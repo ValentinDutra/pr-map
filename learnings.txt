@@ -80,3 +80,9 @@ EXECUTION NOTES (appended per task)
   main.tsx (`@xyflow/react/dist/style.css`). dagre layout: rankdir 'LR'. Build = `tsc --noEmit &&
   vite build`. Dashboard dev server :5599 proxies /api -> :5598 (the Node server port). App loads
   the checked-in fixture for now; swap to GET /api/graph in the server/review tasks.
+- Task 10: added `patch?: string` to GraphNode (src/types.ts + dashboard mirror); buildNodes now
+  copies file.patch. Diff rendering uses prism-react-renderer `<Highlight language="diff">` plus a
+  per-line background by first char (+ green, - red, @@ blue) so coloring is robust regardless of
+  Prism's diff grammar. Selection state via zustand (src/store.ts, useSelection). Detail panel is a
+  right-side absolute overlay so the graph doesn't reflow. Vite warns chunks >500kB (advisory only,
+  build still exits 0).

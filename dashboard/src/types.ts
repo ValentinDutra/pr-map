@@ -14,6 +14,7 @@ export interface GraphNode {
   status?: NodeStatus;
   additions?: number;
   deletions?: number;
+  patch?: string;
   summary?: string;
 }
 

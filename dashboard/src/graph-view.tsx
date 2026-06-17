@@ -10,6 +10,7 @@ import {
 import type { PrGraph } from './types';
 import { layoutGraph } from './layout';
 import { FileNode, type FileFlowNode } from './file-node';
+import { useSelection } from './store';
 
 const nodeTypes: NodeTypes = { file: FileNode };
 
@@ -51,6 +52,7 @@ function buildFlow(
 
 export function GraphView({ graph }: { graph: PrGraph }) {
   const [query, setQuery] = useState('');
+  const select = useSelection((state) => state.select);
   const { nodes, edges } = useMemo(() => buildFlow(graph, query), [graph, query]);
 
   return (
@@ -69,7 +71,14 @@ export function GraphView({ graph }: { graph: PrGraph }) {
           solid = static import · dashed purple = LLM-inferred
         </div>
       </div>
-      <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} fitView>
+      <ReactFlow
+        nodes={nodes}
+        edges={edges}
+        nodeTypes={nodeTypes}
+        onNodeClick={(_, node) => select(node.id)}
+        onPaneClick={() => select(null)}
+        fitView
+      >
         <Background />
         <Controls />
         <MiniMap pannable zoomable />

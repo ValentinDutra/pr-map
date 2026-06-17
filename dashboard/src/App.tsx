@@ -1,4 +1,5 @@
 import { GraphView } from './graph-view';
+import { DetailPanel } from './detail-panel';
 import graphFixture from './__fixtures__/graph.json';
 import type { PrGraph } from './types';
 
@@ -6,5 +7,10 @@ import type { PrGraph } from './types';
 const graph = graphFixture as unknown as PrGraph;
 
 export function App() {
-  return <GraphView graph={graph} />;
+  return (
+    <div className="relative h-full w-full">
+      <GraphView graph={graph} />
+      <DetailPanel graph={graph} />
+    </div>
+  );
 }

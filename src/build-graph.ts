@@ -47,6 +47,7 @@ export function buildNodes(rawPr: RawPr): GraphNode[] {
     status: file.status,
     additions: file.additions,
     deletions: file.deletions,
+    patch: file.patch,
     summary: '',
   }));
 }

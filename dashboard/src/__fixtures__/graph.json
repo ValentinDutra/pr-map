@@ -18,6 +18,7 @@
       "status": "modified",
       "additions": 3,
       "deletions": 1,
+      "patch": "@@ -1,4 +1,6 @@\n import { helper } from './util';\n-import { db } from '../lib/db';\n+import { db, activeDiscounts } from '../lib/db';\n+import express from 'express';\n \n export function checkout() {\n+  return activeDiscounts();\n }",
       "summary": "Wires the discount calculator into checkout."
     },
     {
@@ -28,6 +29,7 @@
       "status": "modified",
       "additions": 2,
       "deletions": 0,
+      "patch": "@@ -3,3 +3,7 @@\n import { config } from './config';\n+\n+export function activeDiscounts() {\n+  return query(config, 'SELECT * FROM discounts WHERE active');\n+}",
       "summary": "Adds a query for active discounts."
     },
     {
@@ -38,6 +40,7 @@
       "status": "added",
       "additions": 4,
       "deletions": 0,
+      "patch": "@@ -0,0 +1,4 @@\n+from pkg.core import run\n+import os\n+\n+run(os.environ['DB_URL'])",
       "summary": "Batch script to recompute discounts."
     },
     {
