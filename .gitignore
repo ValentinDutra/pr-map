@@ -1,0 +1,18 @@
+# Dependencies
+node_modules/
+dashboard/node_modules/
+
+# Build output
+dist/
+dashboard/dist/
+
+# Runtime working data (per-PR graphs, raw data, pending reviews)
+.pr-map/
+
+# Logs and OS noise
+*.log
+.DS_Store
+
+# Editor
+.vscode/
+.idea/

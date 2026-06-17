@@ -1,0 +1,48 @@
+pr-map — context and decisions (seed for autonomous execution)
+
+WHAT WE ARE BUILDING
+A Claude Code plugin/skill `/pr-map <pr-ref>` that turns a GitHub PR into an
+interactive web mind map and lets the user review it (inline + general comments +
+verdict) from the browser, posting to GitHub via the `gh` CLI.
+
+KEY DECISIONS (locked during brainstorming)
+- Surface: interactive web dashboard (browser), launched from the CLI. NOT terminal/ASCII.
+- Engine: step-by-step pipeline. (1) changed files -> nodes. (2) static regex import
+  scan -> edges + one-hop neighbors; no relation -> isolated node. (3) Claude Code agent
+  enriches: writes the "why" per node/edge, may add semantic edges. Every edge tagged
+  origin (static|llm) + confidence so LLM-inferred links are never confused with certain ones.
+- Distribution: Claude Code plugin/skill. The "LLM step" is the agent at runtime — no
+  Anthropic API key, no separate billing. Core (graph builder + dashboard) kept as
+  separate Node modules so a standalone CLI is a cheap future add.
+- Review actions: FULL review — inline comments, general comment, verdict
+  (approve/request-changes/comment), and replies to existing threads. All via `gh`.
+- Review UX: redacted and submitted from the dashboard. A small local Node backend
+  relays to `gh`. GitHub's pending-then-submit model is respected (comments batch
+  locally, then one submit with the verdict).
+- Graph scope: PR files + one-hop neighbors (unchanged files that connect), neighbors
+  styled distinctly (inPr:false). Includes incoming edges (who imports the changed
+  files = blast radius) via `git grep`, and outgoing edges (what the changed files import).
+- Static edges v1: lightweight regex import-rules, NOT full parsers. Start with JS/TS +
+  Python. Adding a language = adding a rule.
+
+ENVIRONMENT
+- gh 2.88.1 authenticated as ValentinDutra, scope includes `repo` (ssh git protocol).
+- node v25.2.1, python3 3.14.5, ripgrep (rg) available. `git grep` is the primary
+  cross-repo reference finder (fast, tracked files only).
+- Private repo `pr-map` under github.com/ValentinDutra.
+
+REFERENCE (study, do NOT fork)
+Understand-Anything (Egonex-AI, MIT). Its dashboard stack we mirror a subset of:
+React 19 + Vite + @xyflow/react (React Flow) + dagre + Tailwind + prism-react-renderer.
+We drop graphology/Louvain/elkjs/d3-force (those are for whole-codebase graphs).
+Useful files to read for patterns:
+  understand-anything-plugin/packages/dashboard/src/components/GraphView.tsx
+  understand-anything-plugin/packages/dashboard/src/components/CodeViewer.tsx
+
+USER CODING PREFERENCES (from CLAUDE.md)
+- Result pattern for error handling; Retry pattern for transient failures.
+- Dependency Injection everywhere feasible (inject the gh executor, inject gh-client).
+- Self-documenting code, no abbreviations (comparisonPeriod, not cp).
+- Tests are liability: minimum tests, maximum value. Test logic units (gh-client, edge
+  detection, review endpoints) with injected fakes/fixtures. Do NOT test pure UI.
+- No Claude attribution in commits or PRs.
