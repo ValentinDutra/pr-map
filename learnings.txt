@@ -52,3 +52,6 @@ EXECUTION NOTES (appended per task)
   `dashboard/**` so the dashboard (React) lints separately. `tsconfig.json` uses NodeNext +
   `include: ["src"]`; needs at least one .ts file or tsc errors "no inputs". `tseslint.configs.recommended`
   (not type-checked) avoids needing parserOptions.project. express pinned ^4 with @types/express ^4.
+- Task 2: NodeNext requires explicit `.js` extensions on relative imports in .ts files
+  (e.g. `from './result.js'`). Import vitest's `describe/it/expect` from 'vitest' (no globals
+  config needed). `tsc --noEmit` also typechecks *.test.ts (they're under src/).
