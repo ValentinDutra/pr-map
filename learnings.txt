@@ -175,3 +175,10 @@ V2 EXECUTION NOTES
   to refresh committed `pr-map-plugin/dashboard-dist`. Full v2 verified: tsc/eslint 0, 34 tests,
   dashboard build + build:plugin 0, and bundled e2e (slugify#75 + hand-written enrichment) shows a
   node carrying insights via /api/graph.
+
+V3 EXECUTION NOTES
+- Task 1: changed-symbols.ts extractChangedSymbols({patch,headContent?,language,status?}) -> Set<string>.
+  Language strings come from build-graph detectLanguage: "typescript"/"javascript"/"python"/"json"...
+  Hunk header context (after 2nd @@) names the enclosing decl (git function-context) -> main signal for
+  modified files; added files parse all exports from headContent (patch alone also works since all +lines).
+  Only EXPORTED names matter (internal types like NewDebt are not importable, so not needed for matching).
