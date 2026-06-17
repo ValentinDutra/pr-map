@@ -129,4 +129,74 @@ describe('createGhClient', () => {
     expect(calls).toHaveLength(2);
     expect(isOk(result)).toBe(true);
   });
+
+  it('createReview maps a multi-line range comment to start_line/start_side', async () => {
+    const { execute, calls } = recordingExecutor([ok('')]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    await client.createReview(42, {
+      event: 'COMMENT',
+      body: '',
+      comments: [
+        { path: 'a.ts', line: 20, side: 'RIGHT', startLine: 18, startSide: 'RIGHT', body: 'range nit' },
+      ],
+    });
+
+    expect(JSON.parse(calls[0].stdin ?? '').comments[0]).toEqual({
+      path: 'a.ts',
+      body: 'range nit',
+      line: 20,
+      side: 'RIGHT',
+      start_line: 18,
+      start_side: 'RIGHT',
+    });
+  });
+
+  it('createFileComment targets the comments endpoint with subject_type file and commit_id', async () => {
+    const { execute, calls } = recordingExecutor([ok('')]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    await client.createFileComment(42, 'abc123', 'src/a.ts', 'whole-file note');
+
+    expect(calls[0].args).toEqual([
+      'api',
+      'repos/{owner}/{repo}/pulls/42/comments',
+      '--method',
+      'POST',
+      '--input',
+      '-',
+    ]);
+    expect(JSON.parse(calls[0].stdin ?? '')).toEqual({
+      commit_id: 'abc123',
+      path: 'src/a.ts',
+      subject_type: 'file',
+      body: 'whole-file note',
+    });
+  });
+
+  it('createConversationComment posts to the issues comments endpoint', async () => {
+    const { execute, calls } = recordingExecutor([ok('')]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    await client.createConversationComment(42, 'general thought');
+
+    expect(calls[0].args[1]).toBe('repos/{owner}/{repo}/issues/42/comments');
+    expect(JSON.parse(calls[0].stdin ?? '')).toEqual({ body: 'general thought' });
+  });
+
+  it('getHeadSha returns the trimmed head sha', async () => {
+    const { execute, calls } = recordingExecutor([ok('deadbeef\n')]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    const result = await client.getHeadSha(42);
+
+    expect(calls[0].args).toEqual([
+      'api',
+      'repos/{owner}/{repo}/pulls/42',
+      '--jq',
+      '.head.sha',
+    ]);
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) expect(result.value).toBe('deadbeef');
+  });
 });

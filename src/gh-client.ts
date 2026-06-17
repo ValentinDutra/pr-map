@@ -29,6 +29,8 @@ export interface ReviewComment {
   path: string;
   line?: number;
   side?: CommentSide;
+  startLine?: number;
+  startSide?: CommentSide;
   body: string;
 }
 
@@ -50,6 +52,17 @@ export interface GhClient {
   replyToComment(
     prNumber: number,
     commentId: number,
+    body: string,
+  ): Promise<Result<string, GhError>>;
+  getHeadSha(prNumber: number): Promise<Result<string, GhError>>;
+  createFileComment(
+    prNumber: number,
+    commitId: string,
+    path: string,
+    body: string,
+  ): Promise<Result<string, GhError>>;
+  createConversationComment(
+    prNumber: number,
     body: string,
   ): Promise<Result<string, GhError>>;
 }
@@ -115,7 +128,14 @@ export function createGhClient(
         JSON.stringify({
           event: submission.event,
           body: submission.body ?? '',
-          comments: submission.comments,
+          comments: submission.comments.map((comment) => ({
+            path: comment.path,
+            body: comment.body,
+            ...(comment.line !== undefined ? { line: comment.line } : {}),
+            ...(comment.side ? { side: comment.side } : {}),
+            ...(comment.startLine !== undefined ? { start_line: comment.startLine } : {}),
+            ...(comment.startSide ? { start_side: comment.startSide } : {}),
+          })),
         }),
       );
     },
@@ -125,6 +145,47 @@ export function createGhClient(
         [
           'api',
           `repos/{owner}/{repo}/pulls/${prNumber}/comments/${commentId}/replies`,
+          '--method',
+          'POST',
+          '--input',
+          '-',
+        ],
+        JSON.stringify({ body }),
+      );
+    },
+
+    async getHeadSha(prNumber) {
+      const raw = await run([
+        'api',
+        `repos/{owner}/{repo}/pulls/${prNumber}`,
+        '--jq',
+        '.head.sha',
+      ]);
+      if (!isOk(raw)) return raw;
+      return ok(raw.value.trim());
+    },
+
+    // File-level comments are not accepted by the bulk reviews endpoint, so they go through
+    // the standalone review-comment endpoint, which needs the head commit_id and subject_type.
+    createFileComment(prNumber, commitId, path, body) {
+      return run(
+        [
+          'api',
+          `repos/{owner}/{repo}/pulls/${prNumber}/comments`,
+          '--method',
+          'POST',
+          '--input',
+          '-',
+        ],
+        JSON.stringify({ commit_id: commitId, path, subject_type: 'file', body }),
+      );
+    },
+
+    createConversationComment(prNumber, body) {
+      return run(
+        [
+          'api',
+          `repos/{owner}/{repo}/issues/${prNumber}/comments`,
           '--method',
           'POST',
           '--input',

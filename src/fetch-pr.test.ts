@@ -38,6 +38,9 @@ function fakeGhClient(options: FakeOptions): {
     createReview: (_prNumber: number, _submission: ReviewSubmission) =>
       Promise.resolve(ok('')),
     replyToComment: () => Promise.resolve(ok('')),
+    getHeadSha: () => Promise.resolve(ok('headsha')),
+    createFileComment: () => Promise.resolve(ok('')),
+    createConversationComment: () => Promise.resolve(ok('')),
   };
   return { client, contentCalls };
 }

@@ -190,3 +190,8 @@ V3 EXECUTION NOTES
   (default = real one). Real run wallet#1: 25->13 nodes, hiddenNeighborCount 9, edges labeled w/ affectedSymbol.
   localBindingsFor uses [^;] not [^;\n] to handle multi-line imports. gh getFileContent is flaky -> a run can
   yield 0 outgoing edges (PR-file content undefined); incoming uses git grep + local reads so it is reliable.
+- Task 3: gh-client ReviewComment gained startLine/startSide -> createReview maps to start_line/start_side
+  (conditional spreads so a plain line comment still serializes to {path,body,line,side}, keeping the old test).
+  File comments do NOT go in the bulk reviews endpoint -> createFileComment(prNumber,commitId,path,body) hits
+  POST pulls/{n}/comments with subject_type:file + commit_id. getHeadSha trims gh stdout. createConversationComment
+  -> issues/{n}/comments. Adding methods to GhClient broke the fakeGhClient in fetch-pr.test.ts -> add stubs there too.
