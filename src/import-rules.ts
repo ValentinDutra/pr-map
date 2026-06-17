@@ -31,10 +31,14 @@ const javascriptRule: ImportRule = {
   resolve(specifier, fromPath, repoFiles) {
     if (!specifier.startsWith('.')) return [];
     const base = path.normalize(path.join(path.dirname(fromPath), specifier));
+    // Under NodeNext, a TypeScript import written as './x.js' actually resolves to
+    // './x.ts'. Strip a trailing JS/TS extension to a stem, then try every known
+    // extension and index file so '.js' specifiers map to their '.ts' source.
+    const stem = base.replace(/\.(?:js|jsx|mjs|cjs|ts|tsx|mts|cts)$/, '');
     const candidates = [
       base,
-      ...JS_EXTENSIONS.map((extension) => `${base}${extension}`),
-      ...JS_EXTENSIONS.map((extension) => path.join(base, `index${extension}`)),
+      ...JS_EXTENSIONS.map((extension) => `${stem}${extension}`),
+      ...JS_EXTENSIONS.map((extension) => path.join(stem, `index${extension}`)),
     ];
     return candidates.filter((candidate) => repoFiles.has(candidate));
   },
