@@ -1,5 +1,12 @@
 export type NodeStatus = 'added' | 'modified' | 'deleted' | 'renamed';
 
+export interface NodeInsights {
+  risks: string[];
+  suspectedBugs: string[];
+  testsToCheck: string[];
+  impact: string;
+}
+
 export interface GraphNode {
   id: string;
   path: string;
@@ -10,6 +17,7 @@ export interface GraphNode {
   deletions?: number;
   patch?: string;
   summary?: string;
+  insights?: NodeInsights;
 }
 
 export type EdgeKind = 'import' | 'reference' | 'semantic';

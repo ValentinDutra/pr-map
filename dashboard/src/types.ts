@@ -2,6 +2,13 @@
 // the dashboard does not cross the Node package boundary at build time.
 
 export type NodeStatus = 'added' | 'modified' | 'deleted' | 'renamed';
+
+export interface NodeInsights {
+  risks: string[];
+  suspectedBugs: string[];
+  testsToCheck: string[];
+  impact: string;
+}
 export type EdgeKind = 'import' | 'reference' | 'semantic';
 export type EdgeDirection = 'outgoing' | 'incoming';
 export type EdgeOrigin = 'static' | 'llm';
@@ -16,6 +23,7 @@ export interface GraphNode {
   deletions?: number;
   patch?: string;
   summary?: string;
+  insights?: NodeInsights;
 }
 
 export interface GraphEdge {
