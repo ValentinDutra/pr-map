@@ -1,3 +1,4 @@
+// Result pattern: callers branch on `ok` instead of catching exceptions.
 export interface Ok<T> {
   readonly ok: true;
   readonly value: T;
