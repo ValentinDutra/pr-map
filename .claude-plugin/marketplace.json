@@ -1,0 +1,15 @@
+{
+  "name": "pr-map",
+  "metadata": {
+    "description": "Visualize a GitHub pull request as an interactive mind map with per-file review insights, and review it from the browser"
+  },
+  "owner": {
+    "name": "ValentinDutra"
+  },
+  "plugins": [
+    {
+      "name": "pr-map",
+      "source": "./pr-map-plugin"
+    }
+  ]
+}
