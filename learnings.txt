@@ -149,3 +149,10 @@ EXECUTION NOTES (appended per task)
     so highlighting was dead; render plain lines with +/- backgrounds + clickable gutter. Uninstalled the
     dep (also shrinks the bundle).
   Re-validated read-only e2e (slugify#75) after fixes: no regressions; /api/nope -> 404 JSON. 32 tests.
+
+V2 EXECUTION NOTES
+- Task 2: merge-enrichment.ts is both an importable module (mergeEnrichment pure fn, tested) and a
+  CLI (dist/merge.js). Guard "run main only when invoked directly" with
+  `import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href` so importing it in vitest
+  does NOT run main() (which would process.exit and kill the test run). Enrichment files are tolerant:
+  accept a single EnrichmentResult, an array, or {files:[...]}, and skip unparseable JSON.
