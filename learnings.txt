@@ -108,3 +108,13 @@ EXECUTION NOTES (appended per task)
   walking @@ hunks; clicking sets selectedLine in the zustand store -> the composer posts an inline
   comment (else general). Submit is gated behind an explicit confirm click. Dashboard mirrors
   ReviewState/PendingComment/ReviewEvent in dashboard/src/types.ts.
+- Task 14: orchestration split — deterministic half is `src/cli.ts` (npm script `map`): takes
+  (ref, repoRoot), chdir to repoRoot (so gh `{owner}/{repo}` + git grep target it), fetch + assemble
+  + writeGraph, prints `{dataDir, graphPath, ...}` JSON. The agent enrichment + posting are driven by
+  the SKILL.md prompt, not code. Plugin is `pr-map-plugin/` with `.claude-plugin/plugin.json` +
+  `skills/pr-map/SKILL.md` (reference repo uses skills/<name>/SKILL.md as the /command, no commands/
+  dir). SKILL.md uses $PR_MAP_HOME for the tool checkout (packaging via CLAUDE_PLUGIN_ROOT is a TODO).
+  VALIDATED read-only end-to-end against sindresorhus/slugify#75: graph = index.js (PR) + test.js
+  (neighbor) with an incoming edge test.js->index.js (git-grep blast radius worked on real code);
+  server served it. Remaining for a TRUE full run (task 15): agent fills summaries/why, and the user
+  submits a review (outward-facing GitHub write) from the dashboard.

@@ -1,0 +1,17 @@
+{
+  "name": "pr-map",
+  "description": "Visualize a GitHub Pull Request as an interactive mind map and review it from the browser",
+  "version": "0.1.0",
+  "author": {
+    "name": "Valentin Dutra"
+  },
+  "repository": "https://github.com/ValentinDutra/pr-map",
+  "license": "MIT",
+  "keywords": [
+    "pull-request",
+    "code-review",
+    "knowledge-graph",
+    "github",
+    "dashboard"
+  ]
+}
