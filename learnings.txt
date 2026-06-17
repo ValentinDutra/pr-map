@@ -202,3 +202,8 @@ V3 EXECUTION NOTES
   New routes: PUT /summary (setSummary), POST /conversation (immediate issue comment). Mirrored types in
   dashboard/src/types.ts (also added affectedSymbol/hiddenNeighborCount). Dashboard build still green (no component
   constructed PendingComment or used generalBody).
+- Task 5: Tailwind v4 class dark mode needs `@custom-variant dark (&:where(.dark, .dark *));` in index.css
+  (no tailwind.config). theme.ts zustand store inits from localStorage("pr-map-theme") else prefers-color-scheme,
+  toggles `dark` class on documentElement. App.tsx gained a column layout with a header (pr-map + PR title + toggle).
+  Components still need dark: variants (task 6). Root eslint ignores dashboard/**, so dashboard is checked only by
+  its own `tsc --noEmit` inside `npm --prefix dashboard run build`.

@@ -1,10 +1,26 @@
 import { useEffect, useState } from 'react';
 import { GraphView } from './graph-view';
 import { Sidebar } from './sidebar';
+import { useTheme } from './theme';
 import graphFixture from './__fixtures__/graph.json';
 import type { PrGraph } from './types';
 
 const fixtureGraph = graphFixture as unknown as PrGraph;
+
+function ThemeToggle() {
+  const theme = useTheme((state) => state.theme);
+  const toggle = useTheme((state) => state.toggle);
+  return (
+    <button
+      type="button"
+      onClick={toggle}
+      title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} theme`}
+      className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+    >
+      {theme === 'dark' ? 'Light' : 'Dark'} mode
+    </button>
+  );
+}
 
 export function App() {
   const [graph, setGraph] = useState<PrGraph | null>(null);
@@ -22,16 +38,29 @@ export function App() {
     return () => controller.abort();
   }, []);
 
-  if (!graph) {
-    return <div className="p-6 text-sm text-slate-500">Loading PR graph…</div>;
-  }
-
   return (
-    <div className="flex h-full w-full">
-      <div className="relative flex-1">
-        <GraphView graph={graph} />
-      </div>
-      <Sidebar graph={graph} />
+    <div className="flex h-full w-full flex-col bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
+      <header className="flex items-center justify-between border-b border-slate-200 px-4 py-2 dark:border-slate-800">
+        <div className="flex items-baseline gap-2">
+          <span className="text-sm font-semibold">pr-map</span>
+          {graph ? (
+            <span className="text-xs text-slate-500 dark:text-slate-400">
+              #{graph.meta.number} {graph.meta.title}
+            </span>
+          ) : null}
+        </div>
+        <ThemeToggle />
+      </header>
+      {graph ? (
+        <div className="flex min-h-0 flex-1">
+          <div className="relative flex-1">
+            <GraphView graph={graph} />
+          </div>
+          <Sidebar graph={graph} />
+        </div>
+      ) : (
+        <div className="p-6 text-sm text-slate-500 dark:text-slate-400">Loading PR graph…</div>
+      )}
     </div>
   );
 }
