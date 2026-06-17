@@ -86,3 +86,10 @@ EXECUTION NOTES (appended per task)
   Prism's diff grammar. Selection state via zustand (src/store.ts, useSelection). Detail panel is a
   right-side absolute overlay so the graph doesn't reflow. Vite warns chunks >500kB (advisory only,
   build still exits 0).
+- Task 11: server.ts default port 5598 (dashboard dev proxy points here). Entry runs only when
+  process.argv[2] (data dir) is set, so importing it in tests is safe. Set PRMAP_NO_OPEN=1 to skip
+  opening a browser (use in automated checks). dashboard dist resolved via
+  `fileURLToPath(new URL('../dashboard/dist', import.meta.url))`. express ^4 needed for the
+  `app.get('*')` SPA fallback (express 5 changed wildcard syntax). To verify a background server
+  without a foreground sleep: start with `&`, then `curl --retry N --retry-connrefused --retry-delay 1`.
+  createApp(dataDir) is exported so the review router (task 12) can mount on the same app.
