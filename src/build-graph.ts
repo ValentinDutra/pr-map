@@ -1,5 +1,6 @@
 import type { RawPr } from './fetch-pr.js';
-import type { GraphNode } from './types.js';
+import type { GraphEdge, GraphNode } from './types.js';
+import { findRule } from './import-rules.js';
 
 const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   ts: 'typescript',
@@ -45,4 +46,60 @@ export function buildNodes(rawPr: RawPr): GraphNode[] {
     deletions: file.deletions,
     summary: '',
   }));
+}
+
+export interface GraphParts {
+  nodes: GraphNode[];
+  edges: GraphEdge[];
+}
+
+function ensureNeighbor(nodesById: Map<string, GraphNode>, targetPath: string): void {
+  if (nodesById.has(targetPath)) return;
+  nodesById.set(targetPath, {
+    id: targetPath,
+    path: targetPath,
+    language: detectLanguage(targetPath),
+    inPr: false,
+  });
+}
+
+function addEdge(
+  edgesById: Map<string, GraphEdge>,
+  edge: Omit<GraphEdge, 'id'>,
+): void {
+  const id = `${edge.source}->${edge.target}:${edge.kind}:${edge.direction}`;
+  if (!edgesById.has(id)) {
+    edgesById.set(id, { id, ...edge });
+  }
+}
+
+export function addOutgoingEdges(
+  nodes: GraphNode[],
+  rawPr: RawPr,
+  repoFiles: Set<string>,
+): GraphParts {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const edgesById = new Map<string, GraphEdge>();
+
+  for (const file of rawPr.files) {
+    if (file.content === undefined) continue;
+    const rule = findRule(file.path);
+    if (!rule) continue;
+    for (const specifier of rule.extractSpecifiers(file.content)) {
+      for (const target of rule.resolve(specifier, file.path, repoFiles)) {
+        if (target === file.path) continue;
+        ensureNeighbor(nodesById, target);
+        addEdge(edgesById, {
+          source: file.path,
+          target,
+          kind: 'import',
+          direction: 'outgoing',
+          origin: 'static',
+          confidence: 1,
+        });
+      }
+    }
+  }
+
+  return { nodes: [...nodesById.values()], edges: [...edgesById.values()] };
 }

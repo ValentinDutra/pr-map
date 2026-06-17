@@ -61,3 +61,8 @@ EXECUTION NOTES (appended per task)
   per-file patch + status come from `gh api repos/{owner}/{repo}/pulls/<n>/files --paginate`
   (GitHub status 'removed' maps to our 'deleted'). createGhClient takes retryOptions for DI
   (tests pass delayMs:0).
+- Task 6: use `node:path` `posix` variant for repo-relative resolution so separators stay '/'
+  regardless of OS. import-rules `resolve` only handles relative specifiers (leading '.');
+  bare/external specifiers (express, os) return [] so no spurious nodes. Shared fixture lives
+  at src/__fixtures__/sample-pr.ts (exports sampleRawPr + sampleRepoFiles). `repoFiles` is an
+  injected Set (the real provider = `git ls-files`, lives in orchestration, not the core).
