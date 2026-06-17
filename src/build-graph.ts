@@ -1,6 +1,9 @@
-import type { RawPr } from './fetch-pr.js';
-import type { GraphEdge, GraphNode } from './types.js';
+import { mkdir, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
+import { type RawPr, workingDirKey } from './fetch-pr.js';
+import type { GraphEdge, GraphNode, PrGraph } from './types.js';
 import { findRule } from './import-rules.js';
+import { type Result, ok, err } from './result.js';
 
 const LANGUAGE_BY_EXTENSION: Record<string, string> = {
   ts: 'typescript',
@@ -157,4 +160,56 @@ export function addIncomingEdges(
   }
 
   return { nodes: [...nodesById.values()], edges: [...edgesById.values()] };
+}
+
+function dedupeById<T extends { id: string }>(items: T[]): T[] {
+  const byId = new Map<string, T>();
+  for (const item of items) {
+    if (!byId.has(item.id)) byId.set(item.id, item);
+  }
+  return [...byId.values()];
+}
+
+export function assembleGraph(
+  rawPr: RawPr,
+  repoFiles: Set<string>,
+  gitGrep: GitGrep,
+  readContent: ReadContent,
+  generatedAt: string,
+): PrGraph {
+  const prNodes = buildNodes(rawPr);
+  const outgoing = addOutgoingEdges(prNodes, rawPr, repoFiles);
+  const prFilePaths = rawPr.files.map((file) => file.path);
+  const incoming = addIncomingEdges(
+    outgoing.nodes,
+    prFilePaths,
+    repoFiles,
+    gitGrep,
+    readContent,
+  );
+  return {
+    meta: rawPr.meta,
+    nodes: dedupeById([...outgoing.nodes, ...incoming.nodes]),
+    edges: dedupeById([...outgoing.edges, ...incoming.edges]),
+    generatedAt,
+  };
+}
+
+export interface GraphWriteError {
+  message: string;
+}
+
+export async function writeGraph(
+  graph: PrGraph,
+  workingDir: string,
+): Promise<Result<string, GraphWriteError>> {
+  const directory = join(workingDir, '.pr-map', workingDirKey(graph.meta));
+  try {
+    await mkdir(directory, { recursive: true });
+    const filePath = join(directory, 'graph.json');
+    await writeFile(filePath, JSON.stringify(graph, null, 2), 'utf8');
+    return ok(filePath);
+  } catch (error) {
+    return err({ message: `Failed to write graph.json: ${(error as Error).message}` });
+  }
 }

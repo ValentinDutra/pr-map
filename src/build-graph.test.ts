@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   addIncomingEdges,
   addOutgoingEdges,
+  assembleGraph,
   buildNodes,
   detectLanguage,
 } from './build-graph.js';
@@ -153,5 +154,41 @@ describe('addIncomingEdges', () => {
     expect(nodes.find((node) => node.id === 'src/caller.ts')).toMatchObject({
       inPr: false,
     });
+  });
+});
+
+describe('assembleGraph', () => {
+  const gitGrep = (pattern: string): string[] =>
+    pattern === 'lib/db' ? ['src/caller.ts'] : [];
+  const readContent = (path: string): string | undefined =>
+    path === 'src/caller.ts' ? "import { db } from '../lib/db';\n" : undefined;
+
+  it('combines nodes and edges from both passes, deduped, with the given metadata', () => {
+    const graph = assembleGraph(
+      sampleRawPr,
+      sampleRepoFiles,
+      gitGrep,
+      readContent,
+      '2026-06-17T00:00:00.000Z',
+    );
+
+    expect(graph.meta).toEqual(sampleRawPr.meta);
+    expect(graph.generatedAt).toBe('2026-06-17T00:00:00.000Z');
+
+    const nodeIds = graph.nodes.map((node) => node.id).sort();
+    expect(nodeIds).toEqual(
+      [
+        'lib/config.ts',
+        'lib/db.ts',
+        'pkg/core.py',
+        'scripts/run.py',
+        'src/app.ts',
+        'src/caller.ts',
+        'src/util.ts',
+      ].sort(),
+    );
+    expect(graph.edges).toHaveLength(5);
+    expect(new Set(graph.nodes.map((node) => node.id)).size).toBe(graph.nodes.length);
+    expect(new Set(graph.edges.map((edge) => edge.id)).size).toBe(graph.edges.length);
   });
 });
