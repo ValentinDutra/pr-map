@@ -1,151 +1,109 @@
-# pr-map — PR mind map and reviewer
+# pr-map v2 — installable plugin + intelligent review
 
 ## Goal
-Build `pr-map`, a Claude Code plugin invoked as `/pr-map <pr-ref>` that turns a GitHub
-Pull Request into an interactive web mind map and lets the user review it from the
-browser. Changed files are nodes; edges show how files connect (imports/references)
-and why; one-hop neighbors (unchanged files that talk to the changed ones) are included
-so the blast radius is visible. From the dashboard the user writes inline and general
-comments and submits a review (approve / request changes / comment) to GitHub through
-the already-authenticated `gh` CLI. The point is to make "which file talks to which and
-why" obvious before reviewing.
+Turn pr-map into an installable Claude Code plugin anyone can add (`/plugin install pr-map`)
+and use as `/pr-map <PR>`, and make the review smarter: subagents (`pr-file-analyst`) analyze
+each affected file in parallel — risks, suspected bugs, tests to touch, impact — while filling
+the graph's summaries and "why"s. The reviewer sees the changed files, the indirectly-affected
+files, and per-file review insights, in the browser. Design is approved in
+`docs/superpowers/specs/2026-06-17-pr-map-plugin-design.md`.
 
 ## Approach
-Step-by-step pipeline (the engine the user described):
-1. Deterministic Node scripts fetch the PR via `gh` and turn changed files into nodes.
-2. A lightweight regex import-scanner (NOT full parsers) finds edges and pulls in
-   one-hop neighbors. Outgoing edges = what a changed file imports; incoming edges =
-   who imports a changed file (found with `git grep`). Files with no relation stay isolated.
-3. At runtime the Claude Code agent (driven by the skill prompt) enriches the graph:
-   writes the plain-language "why" for each node and edge and may add semantic edges.
-   Every edge carries an `origin` (`static` | `llm`) and a `confidence`, so LLM-inferred
-   links are never confused with certain ones.
-The dashboard is a local web app (React + Vite + React Flow + dagre + Tailwind) served by
-a small Node/Express backend whose write endpoints shell out to `gh`. This mirrors the
-proven core of Understand-Anything (MIT) scoped down to PRs; we study its dashboard for
-patterns but do not fork it. The LLM step is the Claude Code agent, so there is no API key
-and no separate billing. The graph builder and dashboard are kept as standalone Node
-modules so a future standalone CLI is a cheap wrapper.
+Wrap and extend the working v1 (do not rewrite it). For distribution, bundle the deterministic
+runtime with esbuild into self-contained `node` scripts committed inside the plugin, served via
+`${CLAUDE_PLUGIN_ROOT}`, with a root `marketplace.json` (mirrors how Egonex-AI/Understand-Anything
+ships). For intelligence, the skill dispatches `pr-file-analyst` subagents in parallel; their
+structured JSON is folded into `graph.json` by a deterministic, testable merge helper (not by the
+agent hand-editing JSON). The only hook is a `SessionEnd` cleanup that kills the dashboard server.
 
 ## Constraints
-- Do NOT support providers other than GitHub (no GitLab/Bitbucket) in v1.
-- Do NOT call the Anthropic API or manage API keys — the "LLM step" is the Claude Code
-  agent at runtime, driven by the skill prompt.
-- Do NOT handle auth/tokens — rely on the user's already-authenticated `gh` CLI.
-- Do NOT add node granularity below file level (no function/class nodes). Nodes = files.
-- Do NOT write language parsers beyond regex import-rules for JS/TS + Python in v1.
-- Do NOT rebuild the reference repo's extra features: whole-codebase analysis, business/
-  domain views, knowledge-base mode, themes, i18n, persona-adaptive UI, guided tours,
-  community clustering, multiple layout engines.
-- Do NOT auto-submit a review. Submitting posts to GitHub and must be an explicit user action.
-- Do NOT write tests for pure UI components. Test logic units only (gh-client, edge
-  detection, review endpoints) with injected fakes/fixtures.
+- Do NOT build a standalone (non–Claude Code) product or handle any Anthropic API key.
+- Do NOT add hooks other than the server-cleanup `SessionEnd` hook.
+- Do NOT add sub-file node granularity (nodes stay file-level).
+- Do NOT rewrite the working v1 core (`gh-client`, `fetch-pr`, `build-graph`, `repo-scan`,
+  `server`, `review-endpoints`, `cli`, dashboard) — extend it.
+- Do NOT let a `pr-file-analyst` subagent overwrite or remove edges whose `origin` is `static`;
+  it may add `why` text and `origin: "llm"` semantic edges only.
+- Do NOT add new static-edge languages (JS/TS + Python stay; llm semantic edges cover the rest).
+- Do NOT write tests for pure UI or for thin glue (PID write, file copy). Test logic units only.
 - Do NOT add Claude attribution to commits or PRs.
 
 ## Patterns to follow
-- Error handling: use the Result pattern — return `Result<T, E>`, never throw for
-  expected failures. The `Result` type and its `ok`/`err` constructors are created by the
-  contracts task (`src/result.ts`); every task after it imports from there.
-- Transient failures: use the Retry pattern via `retry(...)` in `src/retry.ts` (created by
-  the contracts task), applied inside the gh executor.
-- Dependency Injection: inject the command executor into the gh-client; inject the
-  gh-client into the fetcher and the review endpoints; inject `gitGrep` into the
-  incoming-edge builder. Tests pass fakes.
-- React Flow graph rendering: read `understand-anything-plugin/packages/dashboard/src/components/GraphView.tsx`
-  in `github.com/Egonex-AI/Understand-Anything` (fetch via `gh api repos/Egonex-AI/Understand-Anything/contents/<path>`)
-  and replicate the structure.
-- Diff/code rendering: read that repo's `understand-anything-plugin/packages/dashboard/src/components/CodeViewer.tsx`
-  for the prism-react-renderer pattern.
-- Naming: no abbreviations (`comparisonPeriod`, not `cp`; `changedFiles`, not `cf`).
-- Tests: `vitest`, fixtures under `src/__fixtures__/`, fakes injected via DI.
+- Error handling / DI: Result pattern in `src/result.ts`, Retry in `src/retry.ts`, injected deps as
+  in `src/gh-client.ts` and `src/build-graph.ts` (`gitGrep`/`readContent`).
+- Logic unit + test: follow `src/build-graph.ts` + `src/build-graph.test.ts` (vitest, fixtures under
+  `src/__fixtures__/`, fakes injected).
+- Graph types: `src/types.ts` (mirror in `dashboard/src/types.ts`).
+- Dashboard sections: follow `dashboard/src/detail-panel.tsx`; node styling: `dashboard/src/file-node.tsx`.
+- Plugin agent definition format: read `understand-anything-plugin/agents/graph-reviewer.md` in
+  `github.com/Egonex-AI/Understand-Anything` via `gh api repos/Egonex-AI/Understand-Anything/contents/<path>`.
+- Marketplace format: read that repo's `.claude-plugin/marketplace.json` the same way.
+- Existing skill to rewrite: `pr-map-plugin/skills/pr-map/SKILL.md`.
 
 ## Verification commands
 - Tests: `npx vitest run`
 - Lint: `npx eslint .`
 - Type check: `npx tsc --noEmit`
 - Dashboard build: `npm --prefix dashboard run build`
+- Plugin bundle: `npm run build:plugin`
 
 ## Current state
-Empty private repo `pr-map` (github.com/ValentinDutra) containing only this `plan.md`,
-`README.md`, `learnings.txt`, and `.gitignore`. No code yet. Tooling available: node
-v25.2.1, gh 2.88.1 (authenticated, `repo` scope, ssh), python3 3.14.5, ripgrep, git grep.
-Reference patterns (study, do not fork): `github.com/Egonex-AI/Understand-Anything` (MIT),
-confirmed to contain `understand-anything-plugin/packages/dashboard/src/components/GraphView.tsx`
-and `.../CodeViewer.tsx`.
+Working v1 in this repo (see archived `docs/plan-v1-build-completed.md`): `src/` deterministic
+pipeline + `dashboard/` React app + `pr-map-plugin/` (`.claude-plugin/plugin.json` +
+`skills/pr-map/SKILL.md`). The skill currently uses a hardcoded `$PR_MAP_HOME` and needs
+`npm install` + `tsx` + a dashboard build, so it is NOT installable by others. 32 unit tests,
+lint and typecheck green. Tooling: node v25, gh authenticated, esbuild not yet a dependency.
 
 ## Desired end state
-Running `/pr-map <pr-ref>` from inside a local checkout of a GitHub repo:
-- checks `gh` is authenticated and resolves the PR (number, URL, or current branch),
-- writes `.pr-map/<owner>-<repo>-<number>/graph.json` containing PR-file nodes + one-hop
-  neighbor nodes, static edges (outgoing + incoming) and LLM-added edges, each edge with
-  `origin` and `confidence`, and a `why`/`summary` filled by the agent,
-- opens a browser dashboard: an interactive graph (PR nodes vs neighbor nodes styled
-  differently, edge origin/confidence visible), a click-to-open side panel per node with
-  the file summary and its diff, and search,
-- lets the user add inline comments (file + line) and general comments that batch into a
-  local pending review, then submit with a verdict (APPROVE / REQUEST_CHANGES / COMMENT)
-  and reply to existing review threads — all posted to GitHub via `gh`.
+- `npm run build:plugin` produces committed `pr-map-plugin/dist/{cli,server,merge}.js` and
+  `pr-map-plugin/dashboard-dist/`, runnable with plain `node` (no npm install / tsx).
+- `/plugin marketplace add ValentinDutra/pr-map` + `/plugin install pr-map` makes `/pr-map` available.
+- Running `/pr-map <PR>` in a target repo: builds the static graph, dispatches `pr-file-analyst`
+  subagents in parallel, merges their summaries/whys/insights/llm-edges into `graph.json`, and opens
+  the dashboard showing the graph plus a "Review insights" section per node and a risk indicator on
+  nodes with flagged risks/bugs. Review actions still post to GitHub via `gh`.
+- The dashboard server is killed by the `SessionEnd` hook when the session ends.
 
-## Data contracts (defined once, in `src/types.ts`)
-- `GraphNode`: `id` (repo-relative path), `path`, `language` (by extension), `inPr`
-  (false = one-hop neighbor), `status?` (added|modified|deleted|renamed), `additions?`,
-  `deletions?`, `summary?` (agent-filled).
-- `GraphEdge`: `id`, `source` (node id), `target` (node id), `kind`
-  (import|reference|semantic), `direction` (outgoing|incoming), `origin` (static|llm),
-  `confidence` (0..1), `why?` (agent-filled). Note: `source`/`target` are node ids
-  (React Flow convention); `origin` is the static-vs-llm provenance.
-- `PrMeta`: `owner`, `repo`, `number`, `title`, `description`, `author`, `baseRef`, `headRef`.
-- `PrGraph`: `meta: PrMeta`, `nodes: GraphNode[]`, `edges: GraphEdge[]`, `generatedAt`.
-- `PendingComment`: `id`, `path`, `line?` (absent = file-level/general), `side?`
-  (LEFT|RIGHT), `body`, `inReplyTo?` (GitHub comment id for replies).
-- `ReviewState`: `prNumber`, `comments: PendingComment[]`, `generalBody?`.
+## Data contracts (additions to `src/types.ts` + `dashboard/src/types.ts`)
+- `NodeInsights`: `{ risks: string[]; suspectedBugs: string[]; testsToCheck: string[]; impact: string }`.
+- `GraphNode` gains `insights?: NodeInsights`.
+- `EnrichmentResult` (analyst output / merge input, in `src/merge-enrichment.ts`):
+  `{ path: string; summary?: string; edgeWhys?: Record<string, string>; insights?: NodeInsights;
+  semanticEdges?: { target: string; confidence: number; why: string }[] }`.
 
 ## Edge cases and risks
-- `gh` not authenticated or PR not found: fail fast with a clear message; do not write a
-  partial graph.
-- Path-alias / monorepo imports (tsconfig `paths`, bare specifiers) the regex resolver
-  cannot resolve: emit no static edge rather than guessing; the agent may add a low-
-  confidence `llm` edge. Bare/node_modules specifiers are ignored, not turned into nodes.
-- Binary, generated, or very large files: skip import scanning; still show as nodes.
-- PRs with many files: the graph may get large. v1 renders all of them; if a cap is ever
-  added, `log` what was dropped — never silently truncate.
-- Incoming-edge scan uses `git grep` over tracked files at the PR head; PR-added files are
-  tracked once the branch is checked out, so the tool must operate on the checked-out PR.
-- Renamed files: handle `status: renamed` (old path -> new path) so edges resolve.
-- LLM hallucination: never merge `llm` edges into `static` ones; the UI shows `origin`
-  and `confidence` distinctly. The agent is instructed to flag uncertainty.
-- Submitting a review posts to GitHub and is hard to undo: it is always an explicit user
-  click; the tool never submits automatically.
-- Dashboard port already in use: pick a default port and fall back to the next free one.
+- esbuild may fail to fully bundle a dependency with dynamic requires. `express` and `open` normally
+  bundle; if one resists, mark it external and add it to a minimal `pr-map-plugin/package.json`, OR
+  replace it (node `http` instead of express, `child_process` open) — note which in `learnings.txt`.
+- Committed `dist/`/`dashboard-dist/` are build outputs: they go stale when source or the dashboard
+  changes. The final verification task re-runs `build:plugin` so the committed artifacts are current.
+- A `pr-file-analyst` that errors or returns invalid JSON is skipped: that file keeps the static
+  graph data; the merge helper ignores unparseable inputs and the skill logs which files were skipped.
+- `${CLAUDE_PLUGIN_ROOT}` is only set when run as an installed plugin; for local dev keep using
+  `npm run map`/`serve` with `tsx`.
+- The cleanup hook assumes one active dashboard server (PID at a fixed path); a second concurrent
+  server would orphan the first — acceptable for a single-user local tool.
+- `SessionEnd` may not exist on older Claude Code; if so, document a manual `kill` and do not use
+  `Stop` (it fires every turn).
 
 ## Tasks
 
-- [x] Set up the project tooling. Create `package.json` (deps `express`, `open`; devDeps `typescript`, `tsx`, `vitest`, `eslint`, `@types/node`, `@types/express`), `tsconfig.json` (strict; `module`/`moduleResolution` NodeNext; `noEmit`; `include: ["src"]`), `eslint.config.mjs` (flat config for TypeScript), and a placeholder `src/index.ts` exporting a single constant so `tsc` and `eslint` have an input. Add npm scripts: `typecheck` = `tsc --noEmit`, `lint` = `eslint .`, `test` = `vitest run`. Verify: `npx tsc --noEmit` and `npx eslint .` both exit 0.
+- [ ] Add the insights data contract. In `src/types.ts` add `export interface NodeInsights { risks: string[]; suspectedBugs: string[]; testsToCheck: string[]; impact: string }` and add `insights?: NodeInsights` to `GraphNode`. Mirror both into `dashboard/src/types.ts` (it is a hand-kept copy). Type-only change, no test. Verify: `npx tsc --noEmit` and `npm --prefix dashboard run build` both pass.
 
-- [x] Now that the tooling exists, define the data contracts and shared helpers. Create `src/types.ts` with every type in the "Data contracts" section (`GraphNode`, `GraphEdge`, `PrMeta`, `PrGraph`, `PendingComment`, `ReviewState`). Create `src/result.ts` (a `Result<T, E>` discriminated union with `ok(value)` / `err(error)` constructors and an `isOk` type guard). Create `src/retry.ts` exporting `retry(operation, { attempts, delayMs })` that calls a `Result`-returning async `operation` and retries while it returns `err`, up to `attempts`, with `delayMs` between tries, returning the last `Result`. Write `src/retry.test.ts` (vitest): an operation that errs twice then oks succeeds within 3 attempts; one that always errs returns `err` after exactly `attempts` calls. `result.ts` is type-only — no test. Verify: `npx vitest run src/retry.test.ts` and `npx tsc --noEmit`.
+- [ ] Now that `NodeInsights` exists, create `src/merge-enrichment.ts`. Define `EnrichmentResult` (see Data contracts) and a pure `mergeEnrichment(graph: PrGraph, results: EnrichmentResult[]): PrGraph` that, per result: sets `summary`/`insights` on the node whose `id` equals `result.path`; sets `why` on any edge whose `id` is a key of `edgeWhys` (static OR llm — adding a why never alters edge identity); appends each `semanticEdges` entry as a new edge `{ id: `${path}->${target}:semantic:outgoing`, source: path, target, kind: 'semantic', direction: 'outgoing', origin: 'llm', confidence, why }`, skipping ids that already exist and NEVER removing/altering existing `origin: 'static'` edges. Also add `mergeEnrichmentFromDir(dataDir)` that reads `graph.json` + every `*.json` in `<dataDir>/enrichment/` (ignoring files that fail `JSON.parse`), runs `mergeEnrichment`, and writes `graph.json` back; and a `main()` reading the dataDir from `process.argv[2]`. Follow the Result/IO style of `src/build-graph.ts` (`writeGraph`). Write `src/merge-enrichment.test.ts` (follow `src/build-graph.test.ts`): assert summary/insights/why are merged, a semantic edge is added as `origin: 'llm'`, and a static edge is never modified except for its `why`. Verify: `npx vitest run src/merge-enrichment.test.ts`.
 
-- [x] Now that the contracts and Result/Retry helpers exist, create `src/gh-client.ts`: an injectable client over the `gh` CLI. Define `type CommandExecutor = (args: string[], stdin?: string) => Promise<Result<string, GhError>>` and `createGhClient(execute: CommandExecutor)` returning `getPrMetadata`, `listChangedFiles`, `getDiff`, `getFileContent`, `createReview`, `replyToComment` — each returning a `Result`, wrapping `execute` with `retry` from `src/retry.ts`. Add `createDefaultExecutor()` in the same file: a thin `spawn('gh', args)` wrapper returning `Result`. Follow the Result/Retry/DI patterns above. Write `src/gh-client.test.ts` with a fake `CommandExecutor` returning canned JSON: assert each method builds the right `gh` args and parses output, and that a fail-then-succeed executor triggers a retry. Verify: `npx vitest run src/gh-client.test.ts`.
+- [ ] Make `src/server.ts` distribution-ready. Replace the single `DASHBOARD_DIST` constant with a resolver that picks the first existing candidate relative to `import.meta.url`: `../dashboard-dist` (bundled layout: `pr-map-plugin/dist/server.js`) then `../dashboard/dist` (dev layout: `src/server.js`). On `startServer`, after binding, write the chosen port's PID (`process.pid`) to `join(tmpdir(), 'pr-map-server.pid')` (from `node:os`), overwriting it. Keep everything else (Result usage, `PRMAP_NO_OPEN`, `/api` 404 guard) unchanged. No new test (thin glue). Verify: `npm --prefix dashboard run build` then `PRMAP_NO_OPEN=1 npx tsx src/server.ts <a dir containing graph.json>` serves `/api/graph` (curl) and writes the pid file.
 
-- [x] Now that `gh-client` exists, create `src/fetch-pr.ts`: `fetchPr(ghClient, ref): Promise<Result<RawPr, FetchError>>` resolving the PR ref (number, URL, or current branch) and assembling `RawPr` = PR metadata + changed files (path, status, additions, deletions) + per-file diff + full content at the PR head, using the injected `ghClient`. Define the `RawPr` type at the top of this file. Add `writeRaw(rawPr, workingDir)` saving `.pr-map/<owner>-<repo>-<number>/raw.json`. Inject `ghClient` (do not construct it inside). Write `src/fetch-pr.test.ts` with a fake `ghClient`: assert `RawPr` assembly and the working-dir key. Verify: `npx vitest run src/fetch-pr.test.ts`.
+- [ ] Now that the runtime entrypoints are distribution-ready, add the plugin bundle build. Add `esbuild` as a devDependency. Create `scripts/build-plugin.mjs` that: builds the dashboard (`vite build`) — or assumes the npm script chains it — then esbuild-bundles `src/cli.ts`, `src/server.ts`, and `src/merge-enrichment.ts` to `pr-map-plugin/dist/cli.js`, `pr-map-plugin/dist/server.js`, `pr-map-plugin/dist/merge.js` (`format: 'esm'`, `platform: 'node'`, `bundle: true`, `target: 'node20'`), and copies `dashboard/dist` to `pr-map-plugin/dashboard-dist/`. Add npm script `build:plugin` = `npm --prefix dashboard run build && node scripts/build-plugin.mjs`. Commit the produced `pr-map-plugin/dist/` and `pr-map-plugin/dashboard-dist/` (remove them from `.gitignore` if ignored). Verify: `npm run build:plugin`, then `PRMAP_NO_OPEN=1 node pr-map-plugin/dist/server.js <dir with graph.json>` serves `/api/graph` (curl) and `node pr-map-plugin/dist/cli.js` exits non-zero with a clear gh error (proving the bundle loads).
 
-- [x] Now that the `RawPr` type exists, create `src/build-graph.ts` with node building only: `buildNodes(rawPr): GraphNode[]` mapping each changed file to a `GraphNode` (`id`/`path` = repo-relative path, `language` from a small extension-to-language map, `inPr: true`, `status`, `additions`, `deletions`, empty `summary`); renamed files use the new path as `id`. Write `src/build-graph.test.ts` asserting language detection and field mapping over a small fixture `RawPr`. Verify: `npx vitest run src/build-graph.test.ts`.
+- [ ] Create the `pr-file-analyst` agent definition at `pr-map-plugin/agents/pr-file-analyst.md`. Read `understand-anything-plugin/agents/graph-reviewer.md` from `github.com/Egonex-AI/Understand-Anything` (via `gh api`) first to match the frontmatter/format. The agent is a focused single-file PR reviewer: given a file path, its diff, its content, and its graph neighbors, it returns ONLY a JSON object matching `EnrichmentResult` from `src/merge-enrichment.ts` — `summary`, `edgeWhys` (edgeId → plain-language why), `insights` ({risks, suspectedBugs, testsToCheck, impact}), and optional `semanticEdges` with honest `confidence` and a `why`, flagging uncertainty. Document the exact schema in the agent body. No code, no test. Verify: the file exists and its YAML frontmatter parses (`python3 -c "import yaml,sys; yaml.safe_load(open('pr-map-plugin/agents/pr-file-analyst.md').read().split('---')[1])"`).
 
-- [x] Now that `buildNodes` exists, create `src/import-rules.ts` and add outgoing-edge detection to `src/build-graph.ts`. `import-rules.ts` exports `ImportRule` entries for JS/TS (`import ... from '...'`, `require('...')`, `export ... from '...'`) and Python (`import a.b`, `from a.b import c`), each with `resolve(specifier, fromPath, repoFiles)` returning candidate repo-relative paths (relative specifiers resolved against the importing file's dir, trying known extensions and `index.*` / `__init__.py`; bare/node_modules specifiers return none). Add `addOutgoingEdges(nodes, rawPr, repoFiles)` to `build-graph.ts`: scan each PR node's content for imports, resolve them, create a `GraphEdge` (`kind: import`, `direction: outgoing`, `origin: static`, `confidence: 1`) to the target, and if the target is a repo file not yet a node add it as a neighbor (`inPr: false`). Add fixtures under `src/__fixtures__/` and extend `build-graph.test.ts` for JS/TS + Python resolution and neighbor creation. Verify: `npx vitest run src/build-graph.test.ts`.
+- [ ] Now that the bundle, the merge helper, and the analyst agent exist, rewrite `pr-map-plugin/skills/pr-map/SKILL.md` to orchestrate them. Replace all `$PR_MAP_HOME` references with `${CLAUDE_PLUGIN_ROOT}`. Steps: verify `gh auth`; resolve the PR ref and `gh pr checkout`; run `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <ref> "$(pwd)"` to write the static `graph.json`; dispatch `pr-file-analyst` subagents in parallel over the changed files (≤10 changed files → one per file; >10 → batches of ~5 files), writing each subagent's returned JSON to `<dataDir>/enrichment/<index>.json`; run `node "${CLAUDE_PLUGIN_ROOT}/dist/merge.js" "<dataDir>"` to fold them into `graph.json`; start `node "${CLAUDE_PLUGIN_ROOT}/dist/server.js" "<dataDir>"`. Keep the `EnrichmentResult`/graph contract documented inline. No automated test (it is agent orchestration). Verify: the file parses as Markdown with valid YAML frontmatter and contains no remaining `$PR_MAP_HOME` (`grep -c PR_MAP_HOME` is 0).
 
-- [x] Now that outgoing edges and `import-rules` exist, add incoming-edge (blast-radius) detection to `src/build-graph.ts`: `addIncomingEdges(nodes, prFilePaths, repoFiles, gitGrep)` where `gitGrep(pattern) => string[]` is injected (the default shells out to `git grep -l`). For each PR file derive its importable specifier forms (relative path stems, dotted module path), call `gitGrep` for referencing files, confirm each candidate with the `import-rules` resolver to drop false positives, then add confirmed importers as neighbors (`inPr: false`) and edges (`kind: import`, `direction: incoming`, `origin: static`, `confidence: 1`) from importer to PR file. Inject `gitGrep` (do not call git inside the core function). Extend `build-graph.test.ts` with a fake `gitGrep`: assert importers become neighbors with incoming edges and non-confirming matches are dropped. Verify: `npx vitest run src/build-graph.test.ts`.
+- [ ] Add the marketplace manifest. Read `.claude-plugin/marketplace.json` from `github.com/Egonex-AI/Understand-Anything` (via `gh api`) for the schema, then create `.claude-plugin/marketplace.json` at the repo root listing the `pr-map` plugin located at `./pr-map-plugin`, with owner/metadata. Ensure `pr-map-plugin/.claude-plugin/plugin.json` keeps its name/description/version. Verify: both JSON files parse (`python3 -c "import json; json.load(open('.claude-plugin/marketplace.json'))"`) and the plugin `source`/path resolves to an existing directory.
 
-- [x] Now that the node, outgoing-edge, and incoming-edge builders exist, add assembly and persistence to `src/build-graph.ts`: `assembleGraph(rawPr, repoFiles, gitGrep, generatedAt): PrGraph` runs `buildNodes` -> `addOutgoingEdges` -> `addIncomingEdges`, dedupes nodes/edges by `id`, sets `meta` from `rawPr`, and accepts `generatedAt` as an argument (do not call `Date.now()` inside). Add `writeGraph(graph, workingDir)` writing `.pr-map/<owner>-<repo>-<number>/graph.json`. Extend `build-graph.test.ts` to assert a full deduped `PrGraph` from a fixture. Verify: `npx vitest run src/build-graph.test.ts`.
+- [ ] Now that the server writes a PID file, add the cleanup hook. Create `pr-map-plugin/hooks/cleanup-server.sh` (executable) that reads `${TMPDIR:-/tmp}/pr-map-server.pid`, and if the PID is running, kills it and removes the file. Register it as a `SessionEnd` hook in `pr-map-plugin/.claude-plugin/plugin.json` (or a `pr-map-plugin/hooks/hooks.json` if that is the plugin convention — match what the Claude Code plugin schema expects). No test. Verify: the script is executable and runs without error when no pid file exists (`bash pr-map-plugin/hooks/cleanup-server.sh; echo $?` is 0), and the plugin.json/hooks.json parses as JSON.
 
-- [x] Scaffold the dashboard and render the graph. Create `dashboard/` as a Vite + React 19 + TypeScript app (deps `@xyflow/react`, `@dagrejs/dagre`, `@tailwindcss/vite`, `tailwindcss`) with a checked-in fixture `dashboard/src/__fixtures__/graph.json` shaped as `PrGraph`. Lay the graph out with dagre and render with React Flow: PR nodes vs neighbor nodes (`inPr:false`) styled differently (neighbors dimmed/dashed); edges show `kind`, with `origin` distinguishing style (`static` solid, `llm` dashed) and `confidence` in the tooltip. Add zoom/pan and a search box highlighting matching nodes. Read the reference repo's `GraphView.tsx` (path in "Patterns to follow") via `gh api` first and replicate its structure. Verify: `npm --prefix dashboard run build` succeeds.
+- [ ] Now that `insights` exists in the contract, surface it in the dashboard. In `dashboard/src/detail-panel.tsx` add a "Review insights" section that, when `node.insights` is present, lists `risks`, `suspectedBugs`, `testsToCheck`, and the `impact` note (follow the existing "Connections" section markup). In `dashboard/src/file-node.tsx` add a `hasRisk` field to `FileNodeData` and render a small red indicator when set; compute `hasRisk` in `dashboard/src/graph-view.tsx` `buildFlow` as `(insights.risks.length + insights.suspectedBugs.length) > 0`. Add a sample `insights` block (with at least one risk) to one PR node in `dashboard/src/__fixtures__/graph.json`. No test (UI). Verify: `npm --prefix dashboard run build` passes.
 
-- [x] Now that the dashboard renders the graph, add the node detail + diff side panel. Clicking a node opens a panel showing the path, `summary`, the connected edges with their `why` / `origin` / `confidence`, and the file's unified diff rendered with `prism-react-renderer` (read the reference repo's `CodeViewer.tsx`, path in "Patterns to follow"). Neighbor nodes show relationships only (no diff). Use `zustand` for selected-node state. Verify: `npm --prefix dashboard run build` succeeds.
-
-- [x] Now that `graph.json` (assembly task) and the built dashboard exist, create `src/server.ts`: a Node/Express server serving `dashboard/dist` and exposing `GET /api/graph` (reads `graph.json` from an injected working-dir path). On start pick a default port, fall back to the next free port if taken, and open the browser with `open`. Add npm script `serve` = `tsx src/server.ts <working-dir>`. Keep the static glue thin (no test). Verify: build the dashboard, run `npm run serve` against a fixture working dir, and confirm `curl localhost:<port>/api/graph` returns the graph JSON.
-
-- [x] Now that the server exists, add review endpoints and pending state. Put handlers in `src/review-endpoints.ts` (imported by `server.ts`) so they are testable: `POST /api/review/comment` (add a `PendingComment` — inline with `path`+`line`, or general), `GET /api/review/pending` (return `ReviewState`), `DELETE /api/review/comment/:id`, `POST /api/review/reply` (via `ghClient.replyToComment`), `POST /api/review/submit` (verdict APPROVE|REQUEST_CHANGES|COMMENT -> build the GitHub review payload from pending comments + general body -> `ghClient.createReview` -> clear pending on success). Persist `ReviewState` to `.pr-map/<key>/pending-review.json`. Inject `ghClient`. Write `src/review-endpoints.test.ts` with a fake `ghClient`: comments accumulate and persist, submit builds the correct payload and calls `createReview`, pending clears only on success. Verify: `npx vitest run src/review-endpoints.test.ts`.
-
-- [x] Now that the detail panel and the review endpoints exist, add the review UI to the dashboard. In the detail panel add a comment composer (inline when a diff line is selected, general otherwise) POSTing to `/api/review/comment`; a pending list (with delete) from `/api/review/pending`; a reply box on existing threads; and a submit control with the three verdicts POSTing to `/api/review/submit`, behind an explicit confirm step, showing success/failure. Verify: `npm --prefix dashboard run build` succeeds.
-
-- [x] Now that the fetcher, graph builder, server, and dashboard exist, create the Claude Code plugin and `/pr-map` skill that orchestrates them. Add `pr-map-plugin/.claude-plugin/plugin.json` and `pr-map-plugin/skills/pr-map/SKILL.md`. The skill instructs the agent to: (1) verify `gh auth status` and resolve the PR ref (default the current branch's PR), `gh pr checkout` if needed; (2) run the fetcher then `assembleGraph` to write `graph.json`; (3) ENRICH `graph.json` in place — read the PR description, diffs, and static graph; write a `summary` per node and a `why` per edge; add missing semantic edges as `origin: "llm"` with honest `confidence` and a `why`, never overwriting `static` edges, flagging uncertainty; (4) start the server (which opens the dashboard). Document the exact `graph.json` contract (from `src/types.ts`) inside `SKILL.md`. Verify: run `/pr-map <small real PR>` end to end; the dashboard opens with agent-written summaries/why and edges tagged by origin.
-
-- [x] Run full verification: `npx tsc --noEmit`, `npx eslint .`, `npx vitest run`, `npm --prefix dashboard run build`, and one real end-to-end `/pr-map` run against a sample PR (graph renders, a test comment posts, a COMMENT-verdict review submits to GitHub). Fix any failures.
+- [ ] Run full verification: `npx tsc --noEmit`, `npx eslint .`, `npx vitest run`, `npm --prefix dashboard run build`, and `npm run build:plugin` (which refreshes and must leave `pr-map-plugin/dist/` + `pr-map-plugin/dashboard-dist/` current — commit the refreshed artifacts). Then one end-to-end check: from a checkout of a small real PR, run `node pr-map-plugin/dist/cli.js <ref> "$(pwd)"`, hand-write one `enrichment/0.json`, run `node pr-map-plugin/dist/merge.js "<dataDir>"`, start `node pr-map-plugin/dist/server.js "<dataDir>"`, and confirm `/api/graph` returns a node carrying `insights`. Fix any failures.
