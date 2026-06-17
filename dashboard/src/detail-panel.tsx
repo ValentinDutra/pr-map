@@ -10,6 +10,20 @@ function originBadge(edge: GraphEdge): string {
     : 'border-slate-300 bg-slate-50 text-slate-600';
 }
 
+function InsightList({ label, items, color }: { label: string; items: string[]; color: string }) {
+  if (items.length === 0) return null;
+  return (
+    <div className="mt-1">
+      <div className={`text-[11px] font-medium ${color}`}>{label}</div>
+      <ul className="ml-3 list-disc text-[11px] text-slate-600">
+        {items.map((item, index) => (
+          <li key={index}>{item}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 interface DetailPanelProps {
   graph: PrGraph;
   onChange: () => void;
@@ -67,6 +81,30 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
       </div>
 
       {node.summary ? <p className="text-xs text-slate-700">{node.summary}</p> : null}
+
+      {node.insights ? (
+        <div>
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+            Review insights
+          </div>
+          {node.insights.impact ? (
+            <p className="text-[11px] text-slate-600">
+              <span className="font-medium">Impact:</span> {node.insights.impact}
+            </p>
+          ) : null}
+          <InsightList label="Risks" items={node.insights.risks} color="text-red-700" />
+          <InsightList
+            label="Suspected bugs"
+            items={node.insights.suspectedBugs}
+            color="text-amber-700"
+          />
+          <InsightList
+            label="Tests to check"
+            items={node.insights.testsToCheck}
+            color="text-slate-700"
+          />
+        </div>
+      ) : null}
 
       <div>
         <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">

@@ -19,7 +19,13 @@
       "additions": 3,
       "deletions": 1,
       "patch": "@@ -1,4 +1,6 @@\n import { helper } from './util';\n-import { db } from '../lib/db';\n+import { db, activeDiscounts } from '../lib/db';\n+import express from 'express';\n \n export function checkout() {\n+  return activeDiscounts();\n }",
-      "summary": "Wires the discount calculator into checkout."
+      "summary": "Wires the discount calculator into checkout.",
+      "insights": {
+        "risks": ["checkout() now depends on activeDiscounts() — a slow query here blocks every checkout"],
+        "suspectedBugs": ["activeDiscounts() is called without awaiting; if it returns a promise the result is wrong"],
+        "testsToCheck": ["checkout flow test", "discount calculation test"],
+        "impact": "Changes the checkout path and adds a discounts dependency."
+      }
     },
     {
       "id": "lib/db.ts",
