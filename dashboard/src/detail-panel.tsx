@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import type { DetailTab } from './store';
 import type { GraphEdge, PrGraph, ReviewState } from './types';
 import { useSelection, usePanelTab } from './store';
 import { DiffView } from './diff-view';
+import { reviewApi } from './review-api';
 
 function originBadge(edge: GraphEdge): string {
   return edge.origin === 'llm'
@@ -40,6 +42,20 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
   const selectedNodeId = useSelection((state) => state.selectedNodeId);
   const activeTab = usePanelTab((state) => state.activeTab);
   const setTab = usePanelTab((state) => state.setTab);
+  const [conversationBody, setConversationBody] = useState('');
+  const [postedComments, setPostedComments] = useState<string[]>([]);
+
+  const postConversationComment = async () => {
+    if (!conversationBody.trim()) return;
+    try {
+      await reviewApi.addConversationComment(conversationBody);
+      setPostedComments((previous) => [...previous, conversationBody]);
+      setConversationBody('');
+      setStatus('Posted conversation comment');
+    } catch (error) {
+      setStatus(`Conversation comment failed: ${(error as Error).message}`);
+    }
+  };
 
   const node = graph.nodes.find((candidate) => candidate.id === selectedNodeId);
   if (!node) {
@@ -165,9 +181,33 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
       ) : null}
 
       {activeTab === 'conversation' ? (
-        <p className="text-xs text-slate-400 dark:text-slate-500">
-          PR-level conversation comments appear here.
-        </p>
+        <div className="flex flex-col gap-2">
+          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+            A standalone PR comment, posted to the Conversation tab on GitHub immediately.
+          </p>
+          {postedComments.map((text, index) => (
+            <div
+              key={index}
+              className="rounded border border-slate-200 p-2 text-xs text-slate-700 dark:border-slate-700 dark:text-slate-200"
+            >
+              {text}
+            </div>
+          ))}
+          <textarea
+            value={conversationBody}
+            onChange={(event) => setConversationBody(event.target.value)}
+            placeholder="Comment on the whole PR…"
+            className="h-20 rounded border border-slate-300 p-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+          />
+          <button
+            type="button"
+            onClick={postConversationComment}
+            disabled={!conversationBody.trim()}
+            className="self-start rounded bg-slate-800 px-3 py-1 text-xs text-white disabled:opacity-40 dark:bg-slate-700"
+          >
+            Post comment
+          </button>
+        </div>
       ) : null}
     </section>
   );
