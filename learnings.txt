@@ -93,3 +93,10 @@ EXECUTION NOTES (appended per task)
   `app.get('*')` SPA fallback (express 5 changed wildcard syntax). To verify a background server
   without a foreground sleep: start with `&`, then `curl --retry N --retry-connrefused --retry-delay 1`.
   createApp(dataDir) is exported so the review router (task 12) can mount on the same app.
+- Task 12: createApp now takes ServerDeps {dataDir, ghClient, store} (signature changed from
+  task 11). startServer reads graph.json meta.number for the store's prNumber. Review logic is
+  testable operations (addComment/buildSubmission/submitReview) + a thin Router; tests use an
+  in-memory ReviewStore + fake ghClient (no fs/http). buildSubmission routes line!==undefined to
+  the inline comments array and line===undefined to the review body. submit clears pending ONLY on
+  ok. Replies (POST /reply) call gh immediately, not batched. Verified end-to-end with curl that a
+  posted comment persists to pending-review.json.

@@ -3,22 +3,37 @@ import { readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import openBrowser from 'open';
+import { createGhClient, createDefaultExecutor, type GhClient } from './gh-client.js';
+import {
+  createReviewRouter,
+  createFileReviewStore,
+  type ReviewStore,
+} from './review-endpoints.js';
+import type { PrGraph } from './types.js';
 
 const DEFAULT_PORT = 5598;
 const DASHBOARD_DIST = fileURLToPath(new URL('../dashboard/dist', import.meta.url));
 
-export function createApp(dataDir: string): Express {
+export interface ServerDeps {
+  dataDir: string;
+  ghClient: GhClient;
+  store: ReviewStore;
+}
+
+export function createApp(deps: ServerDeps): Express {
   const app = express();
   app.use(express.json());
 
   app.get('/api/graph', async (_request, response) => {
     try {
-      const raw = await readFile(join(dataDir, 'graph.json'), 'utf8');
+      const raw = await readFile(join(deps.dataDir, 'graph.json'), 'utf8');
       response.type('application/json').send(raw);
     } catch {
       response.status(404).json({ error: 'graph.json not found' });
     }
   });
+
+  app.use('/api/review', createReviewRouter({ ghClient: deps.ghClient, store: deps.store }));
 
   app.use(express.static(DASHBOARD_DIST));
   app.get('*', (_request, response) => {
@@ -26,6 +41,15 @@ export function createApp(dataDir: string): Express {
   });
 
   return app;
+}
+
+async function readPrNumber(dataDir: string): Promise<number> {
+  try {
+    const graph = JSON.parse(await readFile(join(dataDir, 'graph.json'), 'utf8')) as PrGraph;
+    return graph.meta.number;
+  } catch {
+    return 0;
+  }
 }
 
 function listen(app: Express, port: number): Promise<void> {
@@ -39,7 +63,13 @@ export async function startServer(
   dataDir: string,
   preferredPort = DEFAULT_PORT,
 ): Promise<number> {
-  const app = createApp(dataDir);
+  const prNumber = await readPrNumber(dataDir);
+  const app = createApp({
+    dataDir,
+    ghClient: createGhClient(createDefaultExecutor()),
+    store: createFileReviewStore(dataDir, prNumber),
+  });
+
   let port = preferredPort;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     try {
