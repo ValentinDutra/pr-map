@@ -29,6 +29,7 @@ const baseGraph: PrGraph = {
     },
   ],
   generatedAt: '2026-06-17T00:00:00.000Z',
+  hiddenNeighborCount: 0,
 };
 
 const result: EnrichmentResult = {

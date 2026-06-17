@@ -218,3 +218,63 @@ describe('assembleGraph', () => {
     expect(new Set(graph.edges.map((edge) => edge.id)).size).toBe(graph.edges.length);
   });
 });
+
+describe('symbol-level neighbor filtering', () => {
+  it('keeps incoming importers that use a changed symbol and drops those that do not', () => {
+    const target = 'lib/repo.ts';
+    const prNodes = buildNodes(
+      makeRawPr([
+        { path: target, status: 'modified', additions: 1, deletions: 1, patch: '@@ x @@' },
+      ]),
+    );
+    const repoFiles = new Set([target, 'api/debts.ts', 'api/accounts.ts']);
+    const content: Record<string, string> = {
+      'api/debts.ts': "import { createDebt } from '../lib/repo';\nawait createDebt(x);\n",
+      'api/accounts.ts': "import { listAccounts } from '../lib/repo';\nawait listAccounts();\n",
+    };
+    const grep = (pattern: string): string[] =>
+      pattern === 'lib/repo' ? ['api/debts.ts', 'api/accounts.ts'] : [];
+    const read = (path: string): string | undefined => content[path];
+    const changedSymbolsByPath = new Map([[target, new Set(['createDebt', 'updateDebt'])]]);
+
+    const { nodes, edges } = addIncomingEdges(
+      prNodes,
+      [{ path: target }],
+      repoFiles,
+      grep,
+      read,
+      changedSymbolsByPath,
+    );
+
+    expect(edges.map((edge) => edge.source)).toEqual(['api/debts.ts']);
+    expect(edges[0]).toMatchObject({ affectedSymbol: 'createDebt' });
+    expect(nodes.some((node) => node.id === 'api/accounts.ts')).toBe(false);
+  });
+
+  it('keeps an outgoing dependency referenced on a changed line and drops one that is not', () => {
+    const raw = makeRawPr([
+      {
+        path: 'lib/repo.ts',
+        status: 'modified',
+        additions: 1,
+        deletions: 1,
+        patch:
+          '@@ -1,1 +1,1 @@\n' +
+          '-type NewDebt = Omit<Debt, "id">;\n' +
+          '+type NewDebt = Omit<Debt, "id" | "startedAt">;\n',
+        content: "import { Debt } from './types';\nimport { debts } from './schema';\n",
+      },
+    ]);
+    const repoFiles = new Set(['lib/repo.ts', 'lib/types.ts', 'lib/schema.ts']);
+
+    const { nodes, edges } = addOutgoingEdges(buildNodes(raw), raw, repoFiles);
+
+    const targets = edges.map((edge) => edge.target);
+    expect(targets).toContain('lib/types.ts');
+    expect(targets).not.toContain('lib/schema.ts');
+    expect(edges.find((edge) => edge.target === 'lib/types.ts')).toMatchObject({
+      affectedSymbol: 'Debt',
+    });
+    expect(nodes.some((node) => node.id === 'lib/schema.ts')).toBe(false);
+  });
+});

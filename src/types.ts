@@ -33,6 +33,8 @@ export interface GraphEdge {
   origin: EdgeOrigin;
   confidence: number;
   why?: string;
+  // The changed symbol crossing this edge that made the neighbor affected (static edges only).
+  affectedSymbol?: string;
 }
 
 export interface PrMeta {
@@ -51,6 +53,8 @@ export interface PrGraph {
   nodes: GraphNode[];
   edges: GraphEdge[];
   generatedAt: string;
+  // Number of one-hop importers hidden because they use no symbol the diff changed.
+  hiddenNeighborCount: number;
 }
 
 export type CommentSide = 'LEFT' | 'RIGHT';

@@ -182,3 +182,11 @@ V3 EXECUTION NOTES
   Hunk header context (after 2nd @@) names the enclosing decl (git function-context) -> main signal for
   modified files; added files parse all exports from headContent (patch alone also works since all +lines).
   Only EXPORTED names matter (internal types like NewDebt are not importable, so not needed for matching).
+- Task 2: incoming filter = word-match changed symbols in importer content (handles {x}/ns.x/default).
+  Outgoing filter = bindings imported from a dep that appear on changed lines; JS/TS only, else fail-open.
+  KEY: fail-open when changedSymbols/changedWords empty -> degenerate fixture patches keep all edges, so
+  existing build-graph tests pass unchanged. PrGraph.hiddenNeighborCount is now REQUIRED -> had to add it
+  to the merge-enrichment.test.ts baseGraph literal. assembleGraph takes an injected extractChangedSymbols
+  (default = real one). Real run wallet#1: 25->13 nodes, hiddenNeighborCount 9, edges labeled w/ affectedSymbol.
+  localBindingsFor uses [^;] not [^;\n] to handle multi-line imports. gh getFileContent is flaky -> a run can
+  yield 0 outgoing edges (PR-file content undefined); incoming uses git grep + local reads so it is reliable.
