@@ -14,3 +14,15 @@ export const useSelection = create<SelectionState>((set) => ({
   select: (id) => set({ selectedNodeId: id, selectedLine: null }),
   setLine: (line) => set({ selectedLine: line }),
 }));
+
+export type DetailTab = 'diff' | 'insights' | 'conversation';
+
+interface PanelTabState {
+  activeTab: DetailTab;
+  setTab: (tab: DetailTab) => void;
+}
+
+export const usePanelTab = create<PanelTabState>((set) => ({
+  activeTab: 'diff',
+  setTab: (tab) => set({ activeTab: tab }),
+}));

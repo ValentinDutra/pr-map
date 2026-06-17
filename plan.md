@@ -101,7 +101,7 @@ theme provider and a tabbed review panel.
 
 - [x] Now that the theme store and `dark` class toggle exist, add `dark:` Tailwind variants to the review-panel components so light and dark both read cleanly: `dashboard/src/detail-panel.tsx`, `dashboard/src/diff-view.tsx`, `dashboard/src/review-controls.tsx`. Verify with `npm --prefix dashboard run build`.
 
-- [ ] Now that theming exists, add the review-panel tab bar. In `dashboard/src/detail-panel.tsx` add a tab bar with Diff, Insights, and Conversation tabs and render the existing diff and insights content under the first two tabs; track the active tab in `dashboard/src/store.ts`. Verify with `npm --prefix dashboard run build`.
+- [x] Now that theming exists, add the review-panel tab bar. In `dashboard/src/detail-panel.tsx` add a tab bar with Diff, Insights, and Conversation tabs and render the existing diff and insights content under the first two tabs; track the active tab in `dashboard/src/store.ts`. Verify with `npm --prefix dashboard run build`.
 
 - [ ] Now that the tabbed panel exists, add the "Finish review" tray. Move the verdict submit out of `dashboard/src/review-controls.tsx` into a tray opened from the header in `dashboard/src/App.tsx`: a summary textarea plus Approve/Request changes/Comment radios and a submit button, showing a pending-comment count from `/api/review/pending`. Add `setSummary(body)` to `dashboard/src/review-api.ts` (calling the `PUT /summary` route) and have `submit(event)` drive the review body from `summaryBody`. Verify with `npm --prefix dashboard run build`.
 

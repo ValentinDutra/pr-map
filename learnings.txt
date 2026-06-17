@@ -207,3 +207,6 @@ V3 EXECUTION NOTES
   toggles `dark` class on documentElement. App.tsx gained a column layout with a header (pr-map + PR title + toggle).
   Components still need dark: variants (task 6). Root eslint ignores dashboard/**, so dashboard is checked only by
   its own `tsc --noEmit` inside `npm --prefix dashboard run build`.
+- Task 8: usePanelTab store (diff|insights|conversation, default diff) in store.ts. detail-panel split into
+  tabs: Diff (diff+composer or neighbor message), Insights (summary+insights+connections), Conversation (placeholder,
+  filled task 11). Node header stays above the tab bar.
