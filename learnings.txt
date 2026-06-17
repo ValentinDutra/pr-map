@@ -219,3 +219,6 @@ V3 EXECUTION NOTES
   button -> scope:file comment. Pending line/file comments render inline as threads. detail-panel now receives
   `pending` (threaded from Sidebar) and filters comments by node.path; old selectedLine composer removed. Connections
   list now shows edge.affectedSymbol. store selectedLine/setLine are now dead (harmless) - clean up later if needed.
+- Task 13: full verify green (tsc0, eslint0, 47 tests, dashboard build0, build:plugin0). Bundled e2e vs wallet#1:
+  cli 13 nodes/5 edges/hidden9; server /api/graph serves hidden9 + affectedSymbol edge labels; index.html title pr-map.
+  Server PRMAP_NO_OPEN=1 to skip browser in headless checks.
