@@ -156,3 +156,10 @@ V2 EXECUTION NOTES
   `import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href` so importing it in vitest
   does NOT run main() (which would process.exit and kill the test run). Enrichment files are tolerant:
   accept a single EnrichmentResult, an array, or {files:[...]}, and skip unparseable JSON.
+- Task 4: esbuild bundles src/{cli,server,merge-enrichment}.ts -> pr-map-plugin/dist/{cli,server,merge}.js
+  (format esm, platform node, target node20, bundle true). REQUIRED banner so CJS deps (express/open)
+  that call require at runtime work in ESM output:
+  `import { createRequire as __createRequire } from 'module'; const require = __createRequire(import.meta.url);`
+  express + open bundle fine (no externals needed). All three run with plain `node` (no tsx). .gitignore
+  changed `dist/` -> `/dist/` so pr-map-plugin/dist is committed (the dev root has no dist/). Committed
+  artifacts go stale on source/dashboard changes -> final task re-runs `npm run build:plugin`.
