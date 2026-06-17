@@ -49,8 +49,9 @@ function buildFlow(
     id: edge.id,
     source: edge.source,
     target: edge.target,
-    label:
-      edge.origin === 'llm'
+    label: edge.affectedSymbol
+      ? edge.affectedSymbol
+      : edge.origin === 'llm'
         ? `${edge.kind} ~${formatConfidence(edge.confidence)}`
         : edge.kind,
     animated: edge.direction === 'incoming',
@@ -92,6 +93,12 @@ export function GraphView({ graph }: { graph: PrGraph }) {
         <div className="text-[10px] text-slate-500 dark:text-slate-400">
           solid = static import · dashed purple = LLM-inferred
         </div>
+        {graph.hiddenNeighborCount > 0 ? (
+          <div className="text-[10px] text-slate-500 dark:text-slate-400">
+            {graph.hiddenNeighborCount} importer{graph.hiddenNeighborCount === 1 ? '' : 's'} with no
+            affected symbols, hidden
+          </div>
+        ) : null}
       </div>
       <ReactFlow
         nodes={nodes}
