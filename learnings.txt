@@ -118,3 +118,12 @@ EXECUTION NOTES (appended per task)
   (neighbor) with an incoming edge test.js->index.js (git-grep blast radius worked on real code);
   server served it. Remaining for a TRUE full run (task 15): agent fills summaries/why, and the user
   submits a review (outward-facing GitHub write) from the dashboard.
+- Task 15: full verification green (tsc, eslint, vitest 27 tests, dashboard build). eslint needed
+  argsIgnorePattern '^_' for intentionally-unused fake params. BUG found during e2e and fixed: the
+  JS/TS import resolver did not map NodeNext '.js' specifiers to '.ts' source files, so it found zero
+  edges in our own TS codebase. Fix: strip a trailing js/ts extension to a stem, then try all
+  extensions/index (src/import-rules.ts) — added src/import-rules.test.ts. FULL e2e validated on a
+  throwaway PR (ValentinDutra/pr-map#1, now closed): graph showed src/result.ts + its 10 importers as
+  incoming edges (blast radius), agent enrichment filled summary/why, an inline comment + a COMMENT
+  review posted to GitHub (verified via gh api), then PR/branch/.pr-map cleaned up. NOTE: GitHub
+  forbids APPROVE on your own PR, so self-tests must use the COMMENT verdict.
