@@ -163,3 +163,8 @@ V2 EXECUTION NOTES
   express + open bundle fine (no externals needed). All three run with plain `node` (no tsx). .gitignore
   changed `dist/` -> `/dist/` so pr-map-plugin/dist is committed (the dev root has no dist/). Committed
   artifacts go stale on source/dashboard changes -> final task re-runs `npm run build:plugin`.
+- Task 8: Claude Code plugin hooks live in `pr-map-plugin/hooks/hooks.json` and are AUTO-DISCOVERED
+  (plugin.json does NOT reference them — confirmed vs the langsmith-tracing plugin). Format:
+  `{ "hooks": { "SessionEnd": [ { "hooks": [ { "type":"command", "command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/cleanup-server.sh\"", "timeout":10 } ] } ] } }`.
+  cleanup-server.sh kills the PID at ${TMPDIR:-/tmp}/pr-map-server.pid (matches node os.tmpdir()).
+  Verified it kills a live server. Keep the script's +x bit committed.
