@@ -214,3 +214,8 @@ V3 EXECUTION NOTES
   -> PUT /api/review/summary, then submit(event). Cross-panel refresh via useReviewRefresh store (bump on submit;
   Sidebar useEffect deps include version). review-controls lost the verdict buttons (moved to tray); keeps pending
   list + reply + delete and now shows scope "(file)" for file comments.
+- Task 10: DiffView is now self-contained for commenting (props: patch,path,comments,onChange,setStatus).
+  Line "+" appears on group-hover; shift-click extends a range (startLine..line, side RIGHT). "Comment on file"
+  button -> scope:file comment. Pending line/file comments render inline as threads. detail-panel now receives
+  `pending` (threaded from Sidebar) and filters comments by node.path; old selectedLine composer removed. Connections
+  list now shows edge.affectedSymbol. store selectedLine/setLine are now dead (harmless) - clean up later if needed.

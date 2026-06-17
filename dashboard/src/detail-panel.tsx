@@ -1,9 +1,7 @@
-import { useState } from 'react';
 import type { DetailTab } from './store';
-import type { GraphEdge, PrGraph } from './types';
+import type { GraphEdge, PrGraph, ReviewState } from './types';
 import { useSelection, usePanelTab } from './store';
 import { DiffView } from './diff-view';
-import { reviewApi } from './review-api';
 
 function originBadge(edge: GraphEdge): string {
   return edge.origin === 'llm'
@@ -33,16 +31,15 @@ const TABS: { id: DetailTab; label: string }[] = [
 
 interface DetailPanelProps {
   graph: PrGraph;
+  pending: ReviewState | null;
   onChange: () => void;
   setStatus: (status: string | null) => void;
 }
 
-export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
+export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanelProps) {
   const selectedNodeId = useSelection((state) => state.selectedNodeId);
-  const selectedLine = useSelection((state) => state.selectedLine);
   const activeTab = usePanelTab((state) => state.activeTab);
   const setTab = usePanelTab((state) => state.setTab);
-  const [body, setBody] = useState('');
 
   const node = graph.nodes.find((candidate) => candidate.id === selectedNodeId);
   if (!node) {
@@ -56,25 +53,7 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
   const connectedEdges = graph.edges.filter(
     (edge) => edge.source === node.id || edge.target === node.id,
   );
-  const inlineLine = node.inPr && selectedLine !== null ? selectedLine : undefined;
-  const isInline = inlineLine !== undefined;
-
-  const submitComment = async () => {
-    if (!body.trim()) return;
-    try {
-      await reviewApi.addComment({
-        path: node.path,
-        line: inlineLine,
-        side: isInline ? 'RIGHT' : undefined,
-        body,
-      });
-      setBody('');
-      setStatus(null);
-      onChange();
-    } catch (error) {
-      setStatus(`Add comment failed: ${(error as Error).message}`);
-    }
-  };
+  const fileComments = (pending?.comments ?? []).filter((comment) => comment.path === node.path);
 
   return (
     <section className="flex flex-col gap-3">
@@ -156,6 +135,7 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
                     </div>
                     <div className="text-[11px] text-slate-500 dark:text-slate-400">
                       {edge.kind} · {edge.direction}
+                      {edge.affectedSymbol ? ` · ${edge.affectedSymbol}` : ''}
                     </div>
                     {edge.why ? (
                       <div className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">{edge.why}</div>
@@ -170,27 +150,13 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
 
       {activeTab === 'diff' ? (
         node.inPr && node.patch ? (
-          <>
-            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-              Diff {selectedLine !== null ? `· commenting on line ${selectedLine}` : '· click a line to comment inline'}
-            </div>
-            <DiffView patch={node.patch} />
-            <div className="flex flex-col gap-1">
-              <textarea
-                value={body}
-                onChange={(event) => setBody(event.target.value)}
-                placeholder={isInline ? `Comment on ${node.path}:${selectedLine}` : `General comment on ${node.path}`}
-                className="h-16 rounded border border-slate-300 p-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-              />
-              <button
-                onClick={submitComment}
-                disabled={!body.trim()}
-                className="self-start rounded bg-slate-800 px-3 py-1 text-xs text-white disabled:opacity-40 dark:bg-slate-700"
-              >
-                {isInline ? `Add inline comment (line ${selectedLine})` : 'Add general comment'}
-              </button>
-            </div>
-          </>
+          <DiffView
+            patch={node.patch}
+            path={node.path}
+            comments={fileComments}
+            onChange={onChange}
+            setStatus={setStatus}
+          />
         ) : (
           <p className="text-xs text-slate-400 dark:text-slate-500">
             No diff — this file is a neighbor, not changed in this PR.

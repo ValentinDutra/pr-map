@@ -1,4 +1,4 @@
-import type { CommentSide, ReviewEvent, ReviewState } from './types';
+import type { CommentScope, CommentSide, ReviewEvent, ReviewState } from './types';
 
 async function asJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -8,9 +8,12 @@ async function asJson<T>(response: Response): Promise<T> {
 }
 
 export interface AddCommentInput {
+  scope: CommentScope;
   path: string;
   line?: number;
+  startLine?: number;
   side?: CommentSide;
+  startSide?: CommentSide;
   body: string;
 }
 
