@@ -103,3 +103,58 @@ export function addOutgoingEdges(
 
   return { nodes: [...nodesById.values()], edges: [...edgesById.values()] };
 }
+
+export type GitGrep = (pattern: string) => string[];
+export type ReadContent = (path: string) => string | undefined;
+
+function importPatternsFor(prPath: string): string[] {
+  const withoutExtension = prPath.replace(/\.[^./]+$/, '');
+  const baseName = withoutExtension.slice(withoutExtension.lastIndexOf('/') + 1);
+  const dottedModule = withoutExtension.replace(/\//g, '.');
+  return [...new Set([withoutExtension, baseName, dottedModule])].filter(
+    (pattern) => pattern.length > 0,
+  );
+}
+
+export function addIncomingEdges(
+  nodes: GraphNode[],
+  prFilePaths: string[],
+  repoFiles: Set<string>,
+  gitGrep: GitGrep,
+  readContent: ReadContent,
+): GraphParts {
+  const nodesById = new Map(nodes.map((node) => [node.id, node]));
+  const edgesById = new Map<string, GraphEdge>();
+  const prFileSet = new Set(prFilePaths);
+
+  for (const prPath of prFilePaths) {
+    const candidates = new Set<string>();
+    for (const pattern of importPatternsFor(prPath)) {
+      for (const match of gitGrep(pattern)) {
+        candidates.add(match);
+      }
+    }
+    for (const candidatePath of candidates) {
+      if (candidatePath === prPath || prFileSet.has(candidatePath)) continue;
+      const rule = findRule(candidatePath);
+      if (!rule) continue;
+      const content = readContent(candidatePath);
+      if (content === undefined) continue;
+      const importsThePrFile = rule
+        .extractSpecifiers(content)
+        .some((specifier) => rule.resolve(specifier, candidatePath, repoFiles).includes(prPath));
+      if (!importsThePrFile) continue;
+      ensureNeighbor(nodesById, candidatePath);
+      addEdge(edgesById, {
+        source: candidatePath,
+        target: prPath,
+        kind: 'import',
+        direction: 'incoming',
+        origin: 'static',
+        confidence: 1,
+      });
+    }
+  }
+
+  return { nodes: [...nodesById.values()], edges: [...edgesById.values()] };
+}

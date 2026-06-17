@@ -66,3 +66,10 @@ EXECUTION NOTES (appended per task)
   bare/external specifiers (express, os) return [] so no spurious nodes. Shared fixture lives
   at src/__fixtures__/sample-pr.ts (exports sampleRawPr + sampleRepoFiles). `repoFiles` is an
   injected Set (the real provider = `git ls-files`, lives in orchestration, not the core).
+- Task 7: addIncomingEdges needs to read candidate file content to confirm imports, so it
+  takes a 5th injected dep `readContent` (path)=>string|undefined in addition to `gitGrep`
+  (plan listed 4 args; added readContent — confirmation needs content). Real providers in
+  src/repo-scan.ts: createGitGrep/createReadContent/listRepoFiles. `git grep` exits non-zero
+  on zero matches, so execFileSync throws -> catch returns []. Grep patterns per PR file =
+  path-stem, basename, dotted-module (fixed strings); confirmation via import-rules drops
+  false positives. PR->PR candidates are skipped (already covered by outgoing edges).

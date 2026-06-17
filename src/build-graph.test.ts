@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest';
-import { addOutgoingEdges, buildNodes, detectLanguage } from './build-graph.js';
+import {
+  addIncomingEdges,
+  addOutgoingEdges,
+  buildNodes,
+  detectLanguage,
+} from './build-graph.js';
 import { sampleRawPr, sampleRepoFiles } from './__fixtures__/sample-pr.js';
 import type { RawPr, RawPrFile } from './fetch-pr.js';
 import type { PrMeta } from './types.js';
@@ -98,5 +103,55 @@ describe('addOutgoingEdges', () => {
     const ids = withNeighbors.map((node) => node.id);
     expect(ids).not.toContain('express');
     expect(ids).not.toContain('os');
+  });
+});
+
+describe('addIncomingEdges', () => {
+  const prNodes = buildNodes(sampleRawPr);
+  const prFilePaths = sampleRawPr.files.map((file) => file.path);
+
+  // A confirmed importer of lib/db.ts and a file that merely mentions "db".
+  const candidateContent: Record<string, string> = {
+    'src/caller.ts': "import { db } from '../lib/db';\n",
+    'src/unrelated.ts': 'const db = 1;\n',
+  };
+  const gitGrep = (pattern: string): string[] =>
+    pattern === 'lib/db' ? ['src/caller.ts', 'src/unrelated.ts'] : [];
+  const readContent = (path: string): string | undefined => candidateContent[path];
+
+  it('adds an incoming edge from a confirmed importer of a PR file', () => {
+    const { edges } = addIncomingEdges(
+      prNodes,
+      prFilePaths,
+      sampleRepoFiles,
+      gitGrep,
+      readContent,
+    );
+
+    expect(edges).toEqual([
+      expect.objectContaining({
+        source: 'src/caller.ts',
+        target: 'lib/db.ts',
+        direction: 'incoming',
+        origin: 'static',
+        kind: 'import',
+      }),
+    ]);
+  });
+
+  it('drops grep matches that do not actually import the PR file', () => {
+    const { nodes, edges } = addIncomingEdges(
+      prNodes,
+      prFilePaths,
+      sampleRepoFiles,
+      gitGrep,
+      readContent,
+    );
+
+    expect(edges.some((edge) => edge.source === 'src/unrelated.ts')).toBe(false);
+    expect(nodes.some((node) => node.id === 'src/unrelated.ts')).toBe(false);
+    expect(nodes.find((node) => node.id === 'src/caller.ts')).toMatchObject({
+      inPr: false,
+    });
   });
 });
