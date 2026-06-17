@@ -1,0 +1,133 @@
+{
+  "meta": {
+    "owner": "acme",
+    "repo": "shop",
+    "number": 7,
+    "title": "Add discount calculator",
+    "description": "Adds a discount calculator and wires it into checkout.",
+    "author": "octocat",
+    "baseRef": "main",
+    "headRef": "feature/discount"
+  },
+  "nodes": [
+    {
+      "id": "src/app.ts",
+      "path": "src/app.ts",
+      "language": "typescript",
+      "inPr": true,
+      "status": "modified",
+      "additions": 3,
+      "deletions": 1,
+      "summary": "Wires the discount calculator into checkout."
+    },
+    {
+      "id": "lib/db.ts",
+      "path": "lib/db.ts",
+      "language": "typescript",
+      "inPr": true,
+      "status": "modified",
+      "additions": 2,
+      "deletions": 0,
+      "summary": "Adds a query for active discounts."
+    },
+    {
+      "id": "scripts/run.py",
+      "path": "scripts/run.py",
+      "language": "python",
+      "inPr": true,
+      "status": "added",
+      "additions": 4,
+      "deletions": 0,
+      "summary": "Batch script to recompute discounts."
+    },
+    {
+      "id": "src/util.ts",
+      "path": "src/util.ts",
+      "language": "typescript",
+      "inPr": false,
+      "summary": "Shared helpers (unchanged)."
+    },
+    {
+      "id": "lib/config.ts",
+      "path": "lib/config.ts",
+      "language": "typescript",
+      "inPr": false
+    },
+    {
+      "id": "pkg/core.py",
+      "path": "pkg/core.py",
+      "language": "python",
+      "inPr": false
+    },
+    {
+      "id": "src/caller.ts",
+      "path": "src/caller.ts",
+      "language": "typescript",
+      "inPr": false,
+      "summary": "Checkout entrypoint that imports lib/db (affected by the change)."
+    }
+  ],
+  "edges": [
+    {
+      "id": "src/app.ts->src/util.ts:import:outgoing",
+      "source": "src/app.ts",
+      "target": "src/util.ts",
+      "kind": "import",
+      "direction": "outgoing",
+      "origin": "static",
+      "confidence": 1,
+      "why": "app.ts imports helper from util.ts."
+    },
+    {
+      "id": "src/app.ts->lib/db.ts:import:outgoing",
+      "source": "src/app.ts",
+      "target": "lib/db.ts",
+      "kind": "import",
+      "direction": "outgoing",
+      "origin": "static",
+      "confidence": 1,
+      "why": "app.ts reads active discounts via lib/db.ts."
+    },
+    {
+      "id": "lib/db.ts->lib/config.ts:import:outgoing",
+      "source": "lib/db.ts",
+      "target": "lib/config.ts",
+      "kind": "import",
+      "direction": "outgoing",
+      "origin": "static",
+      "confidence": 1,
+      "why": "lib/db.ts reads connection config."
+    },
+    {
+      "id": "scripts/run.py->pkg/core.py:import:outgoing",
+      "source": "scripts/run.py",
+      "target": "pkg/core.py",
+      "kind": "import",
+      "direction": "outgoing",
+      "origin": "static",
+      "confidence": 1,
+      "why": "run.py imports core.run."
+    },
+    {
+      "id": "src/caller.ts->lib/db.ts:import:incoming",
+      "source": "src/caller.ts",
+      "target": "lib/db.ts",
+      "kind": "import",
+      "direction": "incoming",
+      "origin": "static",
+      "confidence": 1,
+      "why": "caller.ts imports lib/db.ts, so it is affected by this change."
+    },
+    {
+      "id": "src/app.ts->scripts/run.py:semantic:outgoing",
+      "source": "src/app.ts",
+      "target": "scripts/run.py",
+      "kind": "semantic",
+      "direction": "outgoing",
+      "origin": "llm",
+      "confidence": 0.6,
+      "why": "Both compute discounts; likely related though there is no direct import."
+    }
+  ],
+  "generatedAt": "2026-06-17T00:00:00.000Z"
+}

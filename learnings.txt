@@ -73,3 +73,10 @@ EXECUTION NOTES (appended per task)
   on zero matches, so execFileSync throws -> catch returns []. Grep patterns per PR file =
   path-stem, basename, dotted-module (fixed strings); confirmation via import-rules drops
   false positives. PR->PR candidates are skipped (already covered by outgoing edges).
+- Task 9: dashboard stack works: vite 6 + @vitejs/plugin-react + @tailwindcss/vite (Tailwind v4,
+  `@import 'tailwindcss';` in index.css), @xyflow/react ^12 + @dagrejs/dagre ^1.1.4. React Flow
+  custom node typing: FileNodeData must `extends Record<string, unknown>`; node type =
+  `Node<FileNodeData,'file'>`, component props = `NodeProps<FileFlowNode>`. Import xyflow CSS in
+  main.tsx (`@xyflow/react/dist/style.css`). dagre layout: rankdir 'LR'. Build = `tsc --noEmit &&
+  vite build`. Dashboard dev server :5599 proxies /api -> :5598 (the Node server port). App loads
+  the checked-in fixture for now; swap to GET /api/graph in the server/review tasks.
