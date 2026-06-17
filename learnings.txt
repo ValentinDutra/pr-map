@@ -55,3 +55,9 @@ EXECUTION NOTES (appended per task)
 - Task 2: NodeNext requires explicit `.js` extensions on relative imports in .ts files
   (e.g. `from './result.js'`). Import vitest's `describe/it/expect` from 'vitest' (no globals
   config needed). `tsc --noEmit` also typechecks *.test.ts (they're under src/).
+- Task 3: `gh api` resolves `{owner}`/`{repo}` placeholders from the current dir's git remote,
+  so review/file/diff calls don't need owner/repo args (only the local checkout). PR metadata
+  comes from `gh pr view --json ...,url`; owner/repo parsed from the url. Changed files +
+  per-file patch + status come from `gh api repos/{owner}/{repo}/pulls/<n>/files --paginate`
+  (GitHub status 'removed' maps to our 'deleted'). createGhClient takes retryOptions for DI
+  (tests pass delayMs:0).
