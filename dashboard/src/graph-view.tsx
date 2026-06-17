@@ -38,6 +38,10 @@ function buildFlow(
       highlighted:
         normalizedQuery.length > 0 &&
         node.path.toLowerCase().includes(normalizedQuery),
+      hasRisk: Boolean(
+        node.insights &&
+          node.insights.risks.length + node.insights.suspectedBugs.length > 0,
+      ),
     },
   }));
 

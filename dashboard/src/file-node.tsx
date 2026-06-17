@@ -7,6 +7,7 @@ export interface FileNodeData extends Record<string, unknown> {
   inPr: boolean;
   status?: NodeStatus;
   highlighted: boolean;
+  hasRisk: boolean;
 }
 
 export type FileFlowNode = Node<FileNodeData, 'file'>;
@@ -19,8 +20,14 @@ export function FileNode({ data }: NodeProps<FileFlowNode>) {
 
   return (
     <div
-      className={`rounded-md border px-3 py-2 shadow-sm ${baseStyle} ${highlight}`}
+      className={`relative rounded-md border px-3 py-2 shadow-sm ${baseStyle} ${highlight}`}
     >
+      {data.hasRisk ? (
+        <span
+          title="Has review risks or suspected bugs"
+          className="absolute -right-1 -top-1 h-2.5 w-2.5 rounded-full bg-red-500"
+        />
+      ) : null}
       <Handle type="target" position={Position.Left} />
       <div className="max-w-[180px] truncate text-xs font-medium">{data.label}</div>
       <div className="text-[10px] opacity-70">
