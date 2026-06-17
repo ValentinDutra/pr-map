@@ -79,17 +79,17 @@ export function GraphView({ graph }: { graph: PrGraph }) {
 
   return (
     <div className="relative h-full w-full">
-      <div className="absolute left-4 top-4 z-10 flex flex-col gap-1 rounded-md bg-white/90 p-3 shadow">
-        <div className="text-sm font-semibold text-slate-800">
+      <div className="absolute left-4 top-4 z-10 flex flex-col gap-1 rounded-md bg-white/90 p-3 shadow dark:bg-slate-900/90">
+        <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
           #{graph.meta.number} {graph.meta.title}
         </div>
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
           placeholder="Search files…"
-          className="w-64 rounded border border-slate-300 px-2 py-1 text-xs"
+          className="w-64 rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
         />
-        <div className="text-[10px] text-slate-500">
+        <div className="text-[10px] text-slate-500 dark:text-slate-400">
           solid = static import · dashed purple = LLM-inferred
         </div>
       </div>

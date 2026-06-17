@@ -97,7 +97,7 @@ theme provider and a tabbed review panel.
 
 - [x] Add theming infrastructure to the dashboard. Create `dashboard/src/theme.ts` (a small zustand store like `dashboard/src/store.ts`) that initializes from `window.matchMedia('(prefers-color-scheme: dark)')`, persists the choice to `localStorage`, and toggles a `dark` class on `document.documentElement`. Enable Tailwind v4 class-based dark mode in `dashboard/src/index.css`, and add a theme toggle control in the header rendered by `dashboard/src/App.tsx`. Verify with `npm --prefix dashboard run build`.
 
-- [ ] Now that the theme store and `dark` class toggle exist, add `dark:` Tailwind variants to the graph-side components so light and dark both read cleanly: `dashboard/src/graph-view.tsx`, `dashboard/src/file-node.tsx`, `dashboard/src/sidebar.tsx`. Verify with `npm --prefix dashboard run build`.
+- [x] Now that the theme store and `dark` class toggle exist, add `dark:` Tailwind variants to the graph-side components so light and dark both read cleanly: `dashboard/src/graph-view.tsx`, `dashboard/src/file-node.tsx`, `dashboard/src/sidebar.tsx`. Verify with `npm --prefix dashboard run build`.
 
 - [ ] Now that the theme store and `dark` class toggle exist, add `dark:` Tailwind variants to the review-panel components so light and dark both read cleanly: `dashboard/src/detail-panel.tsx`, `dashboard/src/diff-view.tsx`, `dashboard/src/review-controls.tsx`. Verify with `npm --prefix dashboard run build`.
 
