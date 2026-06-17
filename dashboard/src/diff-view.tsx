@@ -28,9 +28,9 @@ function computeLineMeta(patch: string): DiffLineMeta[] {
 }
 
 function lineBackground(text: string): string {
-  if (text.startsWith('+') && !text.startsWith('+++')) return 'bg-green-50';
-  if (text.startsWith('-') && !text.startsWith('---')) return 'bg-red-50';
-  if (text.startsWith('@@')) return 'bg-blue-50 text-blue-700';
+  if (text.startsWith('+') && !text.startsWith('+++')) return 'bg-green-50 dark:bg-green-950/40';
+  if (text.startsWith('-') && !text.startsWith('---')) return 'bg-red-50 dark:bg-red-950/40';
+  if (text.startsWith('@@')) return 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300';
   return '';
 }
 
@@ -41,7 +41,7 @@ export function DiffView({ patch }: { patch: string }) {
   const lineMeta = computeLineMeta(patch);
 
   return (
-    <pre className="overflow-auto rounded border border-slate-200 font-mono text-[11px] leading-4">
+    <pre className="overflow-auto rounded border border-slate-200 font-mono text-[11px] leading-4 dark:border-slate-700">
       {lines.map((text, lineIndex) => {
         const newLine = lineMeta[lineIndex]?.newLine ?? null;
         const isSelected = newLine !== null && newLine === selectedLine;
@@ -50,10 +50,10 @@ export function DiffView({ patch }: { patch: string }) {
             key={lineIndex}
             onClick={() => newLine !== null && setLine(isSelected ? null : newLine)}
             className={`flex ${lineBackground(text)} ${
-              newLine !== null ? 'cursor-pointer hover:bg-amber-100' : ''
+              newLine !== null ? 'cursor-pointer hover:bg-amber-100 dark:hover:bg-amber-900/40' : ''
             } ${isSelected ? 'ring-1 ring-inset ring-amber-400' : ''}`}
           >
-            <span className="w-8 shrink-0 select-none pr-2 text-right text-slate-400">
+            <span className="w-8 shrink-0 select-none pr-2 text-right text-slate-400 dark:text-slate-500">
               {newLine ?? ''}
             </span>
             <span className="flex-1 whitespace-pre-wrap break-all">{text || ' '}</span>

@@ -60,8 +60,8 @@ export function ReviewControls({ pending, refresh, status, setStatus }: ReviewCo
   };
 
   return (
-    <section className="mt-auto flex flex-col gap-3 border-t border-slate-200 pt-3">
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+    <section className="mt-auto flex flex-col gap-3 border-t border-slate-200 pt-3 dark:border-slate-700">
+      <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
         Pending review ({comments.length})
       </div>
 
@@ -69,18 +69,18 @@ export function ReviewControls({ pending, refresh, status, setStatus }: ReviewCo
         {comments.map((comment) => (
           <li
             key={comment.id}
-            className="flex items-start justify-between gap-2 rounded border border-slate-200 p-2 text-xs"
+            className="flex items-start justify-between gap-2 rounded border border-slate-200 p-2 text-xs dark:border-slate-700"
           >
             <div>
-              <div className="font-mono text-[11px] text-slate-600">
+              <div className="font-mono text-[11px] text-slate-600 dark:text-slate-400">
                 {comment.path}
                 {comment.line !== undefined ? `:${comment.line}` : ' (general)'}
               </div>
-              <div className="text-slate-700">{comment.body}</div>
+              <div className="text-slate-700 dark:text-slate-200">{comment.body}</div>
             </div>
             <button
               onClick={() => remove(comment.id)}
-              className="rounded px-1 text-[10px] text-slate-400 hover:bg-slate-100"
+              className="rounded px-1 text-[10px] text-slate-400 hover:bg-slate-100 dark:text-slate-500 dark:hover:bg-slate-800"
             >
               Delete
             </button>
@@ -103,19 +103,19 @@ export function ReviewControls({ pending, refresh, status, setStatus }: ReviewCo
       </div>
 
       <details className="text-xs">
-        <summary className="cursor-pointer text-slate-500">Reply to an existing thread</summary>
+        <summary className="cursor-pointer text-slate-500 dark:text-slate-400">Reply to an existing thread</summary>
         <div className="mt-1 flex flex-col gap-1">
           <input
             value={replyId}
             onChange={(event) => setReplyId(event.target.value)}
             placeholder="GitHub comment id"
-            className="rounded border border-slate-300 px-2 py-1"
+            className="rounded border border-slate-300 px-2 py-1 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
           />
           <textarea
             value={replyBody}
             onChange={(event) => setReplyBody(event.target.value)}
             placeholder="Reply…"
-            className="h-12 rounded border border-slate-300 p-2"
+            className="h-12 rounded border border-slate-300 p-2 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
           />
           <button
             onClick={sendReply}
@@ -126,7 +126,7 @@ export function ReviewControls({ pending, refresh, status, setStatus }: ReviewCo
         </div>
       </details>
 
-      {status ? <div className="text-[11px] text-slate-500">{status}</div> : null}
+      {status ? <div className="text-[11px] text-slate-500 dark:text-slate-400">{status}</div> : null}
     </section>
   );
 }

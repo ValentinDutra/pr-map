@@ -6,8 +6,8 @@ import { reviewApi } from './review-api';
 
 function originBadge(edge: GraphEdge): string {
   return edge.origin === 'llm'
-    ? 'border-purple-300 bg-purple-50 text-purple-700'
-    : 'border-slate-300 bg-slate-50 text-slate-600';
+    ? 'border-purple-300 bg-purple-50 text-purple-700 dark:border-purple-700 dark:bg-purple-950/40 dark:text-purple-300'
+    : 'border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300';
 }
 
 function InsightList({ label, items, color }: { label: string; items: string[]; color: string }) {
@@ -15,7 +15,7 @@ function InsightList({ label, items, color }: { label: string; items: string[]; 
   return (
     <div className="mt-1">
       <div className={`text-[11px] font-medium ${color}`}>{label}</div>
-      <ul className="ml-3 list-disc text-[11px] text-slate-600">
+      <ul className="ml-3 list-disc text-[11px] text-slate-600 dark:text-slate-300">
         {items.map((item, index) => (
           <li key={index}>{item}</li>
         ))}
@@ -38,7 +38,7 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
   const node = graph.nodes.find((candidate) => candidate.id === selectedNodeId);
   if (!node) {
     return (
-      <p className="text-xs text-slate-400">
+      <p className="text-xs text-slate-400 dark:text-slate-500">
         Select a file node to see its connections, diff, and to comment.
       </p>
     );
@@ -70,8 +70,8 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
   return (
     <section className="flex flex-col gap-3">
       <div>
-        <div className="font-mono text-sm font-semibold text-slate-800">{node.path}</div>
-        <div className="text-[11px] text-slate-500">
+        <div className="font-mono text-sm font-semibold text-slate-800 dark:text-slate-100">{node.path}</div>
+        <div className="text-[11px] text-slate-500 dark:text-slate-400">
           {node.language}
           {node.inPr ? ` · ${node.status ?? 'changed'}` : ' · neighbor (not in this PR)'}
           {node.inPr && node.additions !== undefined
@@ -80,15 +80,15 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
         </div>
       </div>
 
-      {node.summary ? <p className="text-xs text-slate-700">{node.summary}</p> : null}
+      {node.summary ? <p className="text-xs text-slate-700 dark:text-slate-300">{node.summary}</p> : null}
 
       {node.insights ? (
         <div>
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
             Review insights
           </div>
           {node.insights.impact ? (
-            <p className="text-[11px] text-slate-600">
+            <p className="text-[11px] text-slate-600 dark:text-slate-300">
               <span className="font-medium">Impact:</span> {node.insights.impact}
             </p>
           ) : null}
@@ -107,7 +107,7 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
       ) : null}
 
       <div>
-        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+        <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
           Connections ({connectedEdges.length})
         </div>
         <ul className="flex flex-col gap-2">
@@ -115,20 +115,20 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
             const isSource = edge.source === node.id;
             const other = isSource ? edge.target : edge.source;
             return (
-              <li key={edge.id} className="rounded border border-slate-200 p-2 text-xs">
+              <li key={edge.id} className="rounded border border-slate-200 p-2 text-xs dark:border-slate-700">
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-slate-700">
+                  <span className="font-mono text-slate-700 dark:text-slate-200">
                     {isSource ? '→' : '←'} {other}
                   </span>
                   <span className={`rounded border px-1 text-[10px] ${originBadge(edge)}`}>
                     {edge.origin} · {Math.round(edge.confidence * 100)}%
                   </span>
                 </div>
-                <div className="text-[11px] text-slate-500">
+                <div className="text-[11px] text-slate-500 dark:text-slate-400">
                   {edge.kind} · {edge.direction}
                 </div>
                 {edge.why ? (
-                  <div className="mt-1 text-[11px] text-slate-600">{edge.why}</div>
+                  <div className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">{edge.why}</div>
                 ) : null}
               </li>
             );
@@ -138,7 +138,7 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
 
       {node.inPr && node.patch ? (
         <div>
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
             Diff {selectedLine !== null ? `· commenting on line ${selectedLine}` : '· click a line to comment inline'}
           </div>
           <DiffView patch={node.patch} />
@@ -150,7 +150,7 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
           value={body}
           onChange={(event) => setBody(event.target.value)}
           placeholder={isInline ? `Comment on ${node.path}:${selectedLine}` : `General comment on ${node.path}`}
-          className="h-16 rounded border border-slate-300 p-2 text-xs"
+          className="h-16 rounded border border-slate-300 p-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
         />
         <button
           onClick={submitComment}

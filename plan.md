@@ -99,7 +99,7 @@ theme provider and a tabbed review panel.
 
 - [x] Now that the theme store and `dark` class toggle exist, add `dark:` Tailwind variants to the graph-side components so light and dark both read cleanly: `dashboard/src/graph-view.tsx`, `dashboard/src/file-node.tsx`, `dashboard/src/sidebar.tsx`. Verify with `npm --prefix dashboard run build`.
 
-- [ ] Now that the theme store and `dark` class toggle exist, add `dark:` Tailwind variants to the review-panel components so light and dark both read cleanly: `dashboard/src/detail-panel.tsx`, `dashboard/src/diff-view.tsx`, `dashboard/src/review-controls.tsx`. Verify with `npm --prefix dashboard run build`.
+- [x] Now that the theme store and `dark` class toggle exist, add `dark:` Tailwind variants to the review-panel components so light and dark both read cleanly: `dashboard/src/detail-panel.tsx`, `dashboard/src/diff-view.tsx`, `dashboard/src/review-controls.tsx`. Verify with `npm --prefix dashboard run build`.
 
 - [ ] Now that theming exists, add the review-panel tab bar. In `dashboard/src/detail-panel.tsx` add a tab bar with Diff, Insights, and Conversation tabs and render the existing diff and insights content under the first two tabs; track the active tab in `dashboard/src/store.ts`. Verify with `npm --prefix dashboard run build`.
 
