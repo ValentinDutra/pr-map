@@ -1,111 +1,108 @@
-# pr-map v2 — installable plugin + intelligent review
+# pr-map v3 — Symbol-level filtering, GitHub-faithful comments, theming
 
 ## Goal
-Turn pr-map into an installable Claude Code plugin anyone can add (`/plugin install pr-map`)
-and use as `/pr-map <PR>`, and make the review smarter: subagents (`pr-file-analyst`) analyze
-each affected file in parallel — risks, suspected bugs, tests to touch, impact — while filling
-the graph's summaries and "why"s. The reviewer sees the changed files, the indirectly-affected
-files, and per-file review insights, in the browser. Design is approved in
-`docs/superpowers/specs/2026-06-17-pr-map-plugin-design.md`.
+Evolve pr-map so the graph shows only neighbors genuinely affected by a PR (decided
+deterministically at the symbol level), the review comment model mirrors GitHub exactly
+(line incl. multi-line range, file, and PR scopes, with Approve/Request changes/Comment
+verdicts plus standalone conversation comments), and the dashboard has an intuitive layout
+with a dark/light theme that follows the OS. Design: `docs/superpowers/specs/2026-06-17-pr-map-v3-design.md`.
 
 ## Approach
-Wrap and extend the working v1 (do not rewrite it). For distribution, bundle the deterministic
-runtime with esbuild into self-contained `node` scripts committed inside the plugin, served via
-`${CLAUDE_PLUGIN_ROOT}`, with a root `marketplace.json` (mirrors how Egonex-AI/Understand-Anything
-ships). For intelligence, the skill dispatches `pr-file-analyst` subagents in parallel; their
-structured JSON is folded into `graph.json` by a deterministic, testable merge helper (not by the
-agent hand-editing JSON). The only hook is a `SessionEnd` cleanup that kills the dashboard server.
+Keep the existing architecture: a deterministic static graph (built by `src/cli.ts` →
+`src/build-graph.ts`) plus LLM enrichment that ONLY explains connections — the LLM never
+decides graph membership. Neighbor filtering is computed statically from each changed file's
+diff: extract the exported symbols the diff touched, then keep a neighbor only if the changed
+lines reference a symbol crossing the edge to it. The comment model extends the existing
+pending-review store (`src/review-endpoints.ts`) and `gh` client (`src/gh-client.ts`) to carry
+the three GitHub scopes. The dashboard (React 19 + Vite + @xyflow/react + Tailwind v4) gains a
+theme provider and a tabbed review panel.
 
 ## Constraints
-- Do NOT build a standalone (non–Claude Code) product or handle any Anthropic API key.
-- Do NOT add hooks other than the server-cleanup `SessionEnd` hook.
-- Do NOT add sub-file node granularity (nodes stay file-level).
-- Do NOT rewrite the working v1 core (`gh-client`, `fetch-pr`, `build-graph`, `repo-scan`,
-  `server`, `review-endpoints`, `cli`, dashboard) — extend it.
-- Do NOT let a `pr-file-analyst` subagent overwrite or remove edges whose `origin` is `static`;
-  it may add `why` text and `origin: "llm"` semantic edges only.
-- Do NOT add new static-edge languages (JS/TS + Python stay; llm semantic edges cover the rest).
-- Do NOT write tests for pure UI or for thin glue (PID write, file copy). Test logic units only.
-- Do NOT add Claude attribution to commits or PRs.
+- Do NOT let the LLM/enrichment decide which nodes or edges exist; membership stays static and
+  reproducible. Enrichment (`src/merge-enrichment.ts`) keeps its current role (summary, why,
+  insights, `origin:"llm"` semantic edges) — do not change it.
+- Do NOT add symbol support beyond JS/TS and Python (match `src/import-rules.ts` coverage).
+- Do NOT change plugin packaging, the `pr-file-analyst` agent, or the SessionEnd hook.
+- Do NOT build GitHub "suggestion" blocks, reactions, or thread-resolution UI.
+- Symbol extraction must FAIL OPEN: if extraction throws or returns an empty set for a file,
+  keep that file's neighbors rather than hiding on uncertainty.
+- Follow CLAUDE.md: Result pattern for errors, Dependency Injection, no abbreviated variable
+  names, self-documenting code, minimum tests for maximum value.
+- Relative imports use NodeNext `.js` extensions (e.g. `import { ok } from './result.js'`).
 
 ## Patterns to follow
-- Error handling / DI: Result pattern in `src/result.ts`, Retry in `src/retry.ts`, injected deps as
-  in `src/gh-client.ts` and `src/build-graph.ts` (`gitGrep`/`readContent`).
-- Logic unit + test: follow `src/build-graph.ts` + `src/build-graph.test.ts` (vitest, fixtures under
-  `src/__fixtures__/`, fakes injected).
-- Graph types: `src/types.ts` (mirror in `dashboard/src/types.ts`).
-- Dashboard sections: follow `dashboard/src/detail-panel.tsx`; node styling: `dashboard/src/file-node.tsx`.
-- Plugin agent definition format: read `understand-anything-plugin/agents/graph-reviewer.md` in
-  `github.com/Egonex-AI/Understand-Anything` via `gh api repos/Egonex-AI/Understand-Anything/contents/<path>`.
-- Marketplace format: read that repo's `.claude-plugin/marketplace.json` the same way.
-- Existing skill to rewrite: `pr-map-plugin/skills/pr-map/SKILL.md`.
+- Pure module + DI: follow `src/import-rules.ts` (exported pure functions, `node:path` posix).
+- Graph building + DI providers (`GitGrep`, `ReadContent`): follow `src/build-graph.ts`.
+- gh client methods (injected `CommandExecutor`, Result return, Retry): follow `src/gh-client.ts`.
+- Review store/router (serialized store, `wrap()` async handlers, Result): follow `src/review-endpoints.ts`.
+- Pure-function unit tests: follow `src/import-rules.test.ts`. Graph tests: `src/build-graph.test.ts`.
+  gh tests: `src/gh-client.test.ts`. Endpoint tests: `src/review-endpoints.test.ts`.
+- Dashboard components: follow `dashboard/src/detail-panel.tsx`, `dashboard/src/diff-view.tsx`,
+  `dashboard/src/review-controls.tsx`, `dashboard/src/review-api.ts`, `dashboard/src/store.ts`.
+- Types mirror: `src/types.ts` is mirrored by `dashboard/src/types.ts` — keep them in sync.
 
 ## Verification commands
-- Tests: `npx vitest run`
-- Lint: `npx eslint .`
-- Type check: `npx tsc --noEmit`
+- Type check: `npm run typecheck`
+- Lint: `npm run lint`
+- Tests: `npm test`
 - Dashboard build: `npm --prefix dashboard run build`
 - Plugin bundle: `npm run build:plugin`
 
 ## Current state
-Working v1 in this repo (see archived `docs/plan-v1-build-completed.md`): `src/` deterministic
-pipeline + `dashboard/` React app + `pr-map-plugin/` (`.claude-plugin/plugin.json` +
-`skills/pr-map/SKILL.md`). The skill currently uses a hardcoded `$PR_MAP_HOME` and needs
-`npm install` + `tsx` + a dashboard build, so it is NOT installable by others. 32 unit tests,
-lint and typecheck green. Tooling: node v25, gh authenticated, esbuild not yet a dependency.
+- `src/build-graph.ts` adds an incoming edge for EVERY file that imports a changed file
+  (`addIncomingEdges` via `git grep`), and an outgoing edge for every import the changed file
+  makes (`addOutgoingEdges`). No symbol-level filtering — all importers become neighbor nodes.
+- `src/types.ts`: `PendingComment { id, path, line?, side?, body, inReplyTo? }`,
+  `ReviewState { prNumber, comments, generalBody? }`. `PrGraph { meta, nodes, edges, generatedAt }`.
+- `src/review-endpoints.ts`: `addComment` (line-presence = inline vs general), `buildSubmission`
+  folds general comments into the review body, `submitReview`, `/comment`, `/pending`,
+  `/comment/:id`, `/reply`, `/submit`. `gh` review via `src/gh-client.ts` `createReview`/`replyToComment`.
+- Dashboard: `App.tsx` fetches `/api/graph`; `graph-view.tsx` renders nodes/edges;
+  `diff-view.tsx` has a clickable line gutter for inline comments; `detail-panel.tsx` shows diff +
+  insights + a comment composer; `review-controls.tsx` holds the verdict submit. No theme, no tabs,
+  no file/PR-scope distinction, no multi-line ranges, no conversation comments.
 
 ## Desired end state
-- `npm run build:plugin` produces committed `pr-map-plugin/dist/{cli,server,merge}.js` and
-  `pr-map-plugin/dashboard-dist/`, runnable with plain `node` (no npm install / tsx).
-- `/plugin marketplace add ValentinDutra/pr-map` + `/plugin install pr-map` makes `/pr-map` available.
-- Running `/pr-map <PR>` in a target repo: builds the static graph, dispatches `pr-file-analyst`
-  subagents in parallel, merges their summaries/whys/insights/llm-edges into `graph.json`, and opens
-  the dashboard showing the graph plus a "Review insights" section per node and a risk indicator on
-  nodes with flagged risks/bugs. Review actions still post to GitHub via `gh`.
-- The dashboard server is killed by the `SessionEnd` hook when the session ends.
-
-## Data contracts (additions to `src/types.ts` + `dashboard/src/types.ts`)
-- `NodeInsights`: `{ risks: string[]; suspectedBugs: string[]; testsToCheck: string[]; impact: string }`.
-- `GraphNode` gains `insights?: NodeInsights`.
-- `EnrichmentResult` (analyst output / merge input, in `src/merge-enrichment.ts`):
-  `{ path: string; summary?: string; edgeWhys?: Record<string, string>; insights?: NodeInsights;
-  semanticEdges?: { target: string; confidence: number; why: string }[] }`.
+- Building the graph for a debt-only change keeps `api/debts/*` and `api/recurring-debts/*` (they
+  call changed debt functions) and drops `api/accounts`, `api/categories`, `api/records`,
+  `api/settings`, `api/wallet`; the printed CLI JSON reports a non-zero hidden-neighbor count.
+- A reviewer can, from the dashboard: comment on a line or a multi-line range; comment on a whole
+  file; write a PR-level review summary; submit a verdict (Approve/Request changes/Comment); and
+  post a standalone conversation comment that appears immediately. Each posts to GitHub via `gh`.
+- The dashboard opens in the OS theme, with a header toggle that persists the choice; the review
+  panel has Diff/Insights/Conversation tabs and a "Finish review" tray with a pending count.
 
 ## Edge cases and risks
-- esbuild may fail to fully bundle a dependency with dynamic requires. `express` and `open` normally
-  bundle; if one resists, mark it external and add it to a minimal `pr-map-plugin/package.json`, OR
-  replace it (node `http` instead of express, `child_process` open) — note which in `learnings.txt`.
-- Committed `dist/`/`dashboard-dist/` are build outputs: they go stale when source or the dashboard
-  changes. The final verification task re-runs `build:plugin` so the committed artifacts are current.
-- A `pr-file-analyst` that errors or returns invalid JSON is skipped: that file keeps the static
-  graph data; the merge helper ignores unparseable inputs and the skill logs which files were skipped.
-- `${CLAUDE_PLUGIN_ROOT}` is only set when run as an installed plugin; for local dev keep using
-  `npm run map`/`serve` with `tsx`.
-- The cleanup hook assumes one active dashboard server (PID at a fixed path); a second concurrent
-  server would orphan the first — acceptable for a single-user local tool.
-- `SessionEnd` may not exist on older Claude Code; if so, document a manual `kill` and do not use
-  `Stop` (it fires every turn).
+- A changed file with no detectable changed symbols (pure internal/whitespace change): fail-open —
+  keep its neighbors, do not silently hide them.
+- `import * as ns` namespace imports: a dependent is affected only if it uses `ns.<changedSymbol>`;
+  check usage, not just the import line.
+- Renamed files already use `previousPath`; symbol filtering must not regress rename handling in
+  `addIncomingEdges`.
+- The GitHub bulk reviews endpoint may not accept `subject_type: file` in `comments[]`; file
+  comments may need `POST /repos/{owner}/{repo}/pulls/{n}/comments` with `commit_id`. Resolve which
+  endpoint works in the gh-client task and use it; this does not change the data model.
+- A reviewer cannot Approve their own PR (GitHub rejects it) — existing behavior, keep the guard.
+- Tailwind v4 dark mode: use a class strategy on the root element so the toggle works without a reload.
 
 ## Tasks
 
-- [x] Add the insights data contract. In `src/types.ts` add `export interface NodeInsights { risks: string[]; suspectedBugs: string[]; testsToCheck: string[]; impact: string }` and add `insights?: NodeInsights` to `GraphNode`. Mirror both into `dashboard/src/types.ts` (it is a hand-kept copy). Type-only change, no test. Verify: `npx tsc --noEmit` and `npm --prefix dashboard run build` both pass.
+- [ ] Create `src/changed-symbols.ts` exporting a pure function `extractChangedSymbols(input: { patch: string; headContent?: string; language: string; status?: string }): Set<string>` that returns the exported symbol names a diff touched. Parse the unified diff: from each hunk header `@@ -a,b +c,d @@ <context>` pull the declared identifier in `<context>` (e.g. `export async function updateDebt` yields `updateDebt`); from added/removed lines pull exported declarations (`export function|const|class|type|interface NAME`, `export default`, `export { A, B }`; Python `def NAME` / `class NAME`). When `status === 'added'`, parse all exports from `headContent`. Cover JS/TS and Python only (branch on `language` like `src/import-rules.ts`). No new dependencies. Write `src/changed-symbols.test.ts` following `src/import-rules.test.ts`: a TS patch whose hunk header names a function, a TS patch adding `export const`, an `added` file returning all its exports, and a Python `def`/`class` patch. Run `npm test` and `npm run typecheck`.
 
-- [x] Now that `NodeInsights` exists, create `src/merge-enrichment.ts`. Define `EnrichmentResult` (see Data contracts) and a pure `mergeEnrichment(graph: PrGraph, results: EnrichmentResult[]): PrGraph` that, per result: sets `summary`/`insights` on the node whose `id` equals `result.path`; sets `why` on any edge whose `id` is a key of `edgeWhys` (static OR llm — adding a why never alters edge identity); appends each `semanticEdges` entry as a new edge `{ id: `${path}->${target}:semantic:outgoing`, source: path, target, kind: 'semantic', direction: 'outgoing', origin: 'llm', confidence, why }`, skipping ids that already exist and NEVER removing/altering existing `origin: 'static'` edges. Also add `mergeEnrichmentFromDir(dataDir)` that reads `graph.json` + every `*.json` in `<dataDir>/enrichment/` (ignoring files that fail `JSON.parse`), runs `mergeEnrichment`, and writes `graph.json` back; and a `main()` reading the dataDir from `process.argv[2]`. Follow the Result/IO style of `src/build-graph.ts` (`writeGraph`). Write `src/merge-enrichment.test.ts` (follow `src/build-graph.test.ts`): assert summary/insights/why are merged, a semantic edge is added as `origin: 'llm'`, and a static edge is never modified except for its `why`. Verify: `npx vitest run src/merge-enrichment.test.ts`.
+- [ ] Now that `extractChangedSymbols` exists, apply symbol-level neighbor filtering in `src/build-graph.ts`. Compute `changedSymbols` per PR file from its `patch`/content and thread it through `addIncomingEdges` and `addOutgoingEdges` (inject `extractChangedSymbols` as a dependency, matching the existing `GitGrep`/`ReadContent` injection style). Incoming: keep a dependent only if it imports/uses a symbol in the changed file's `changedSymbols` (handle `import { x }`, `import * as ns` + `ns.x` usage, default import) — reuse `src/import-rules.ts` resolution. Outgoing: keep a dependency only if a changed (added/removed) line of the changed file references a symbol imported from it. Drop neighbor nodes (`inPr:false`) left with zero active edges. FAIL OPEN per the Constraints. Add a `hiddenNeighborCount: number` field to `PrGraph` and an `affectedSymbol?: string` field to `GraphEdge` in `src/types.ts` (record the symbol that activated each kept edge so the dashboard can label edges later), and include `hiddenNeighborCount` in the `src/cli.ts` printed JSON. Wire the provider in `src/cli.ts`. Extend `src/build-graph.test.ts`: a changed file exporting `{X,Y}` keeps an importer using `X`, drops one using only `Z`, and keeps an outgoing dependency referenced on a changed line. Run `npm test`, `npm run typecheck`, `npm run lint`.
 
-- [x] Make `src/server.ts` distribution-ready. Replace the single `DASHBOARD_DIST` constant with a resolver that picks the first existing candidate relative to `import.meta.url`: `../dashboard-dist` (bundled layout: `pr-map-plugin/dist/server.js`) then `../dashboard/dist` (dev layout: `src/server.js`). On `startServer`, after binding, write the chosen port's PID (`process.pid`) to `join(tmpdir(), 'pr-map-server.pid')` (from `node:os`), overwriting it. Keep everything else (Result usage, `PRMAP_NO_OPEN`, `/api` 404 guard) unchanged. No new test (thin glue). Verify: `npm --prefix dashboard run build` then `PRMAP_NO_OPEN=1 npx tsx src/server.ts <a dir containing graph.json>` serves `/api/graph` (curl) and writes the pid file.
+- [ ] Extend `src/gh-client.ts` for the three comment scopes. Update the `ReviewSubmission`/comment types so review comments may carry `startLine`/`startSide` (multi-line range) and a `subjectType: 'line' | 'file'`; map them into the `gh api .../pulls/{n}/reviews` payload (`start_line`, `start_side`, and file comments via `subject_type: file`, falling back to `POST .../pulls/{n}/comments` with `commit_id` if the bulk endpoint rejects file subjects — verify with `gh api` against a real PR). Add `getHeadSha(prNumber): Promise<Result<string, GhError>>` (`gh api .../pulls/{n} --jq .head.sha`) and `createConversationComment(prNumber, body): Promise<Result<string, GhError>>` (`gh api repos/{owner}/{repo}/issues/{n}/comments -f body=...`). Keep the injected `CommandExecutor`, Result returns, and Retry pattern. Extend `src/gh-client.test.ts` (mock executor) to assert the reviews payload includes range/file fields and that `createConversationComment` calls the issues endpoint. Run `npm test`, `npm run typecheck`.
 
-- [x] Now that the runtime entrypoints are distribution-ready, add the plugin bundle build. Add `esbuild` as a devDependency. Create `scripts/build-plugin.mjs` that: builds the dashboard (`vite build`) — or assumes the npm script chains it — then esbuild-bundles `src/cli.ts`, `src/server.ts`, and `src/merge-enrichment.ts` to `pr-map-plugin/dist/cli.js`, `pr-map-plugin/dist/server.js`, `pr-map-plugin/dist/merge.js` (`format: 'esm'`, `platform: 'node'`, `bundle: true`, `target: 'node20'`), and copies `dashboard/dist` to `pr-map-plugin/dashboard-dist/`. Add npm script `build:plugin` = `npm --prefix dashboard run build && node scripts/build-plugin.mjs`. Commit the produced `pr-map-plugin/dist/` and `pr-map-plugin/dashboard-dist/` (remove them from `.gitignore` if ignored). Verify: `npm run build:plugin`, then `PRMAP_NO_OPEN=1 node pr-map-plugin/dist/server.js <dir with graph.json>` serves `/api/graph` (curl) and `node pr-map-plugin/dist/cli.js` exits non-zero with a clear gh error (proving the bundle loads).
+- [ ] Now that the gh client supports ranges/file/conversation, update the comment model. In `src/types.ts`: replace the line-presence heuristic with `PendingComment { id; scope: 'line' | 'file'; path: string; line?; startLine?; side?; startSide?; body; inReplyTo? }` and add `summaryBody?: string` to `ReviewState` (remove `generalBody`; migrate its role to `summaryBody`). In `src/review-endpoints.ts`: `addComment` accepts `scope` + range fields and validates per scope (line needs `path`+`line`; file needs `path`; if `startLine` set, require `startLine <= line`); `buildSubmission` maps `comments[]` (line + file, with range/subjectType) to the gh submission and uses `summaryBody` for the review body; add a `POST /conversation` route calling `createConversationComment` (immediate, Result-guarded via `wrap()`); add a `PUT /summary` route that persists `summaryBody` via the store. Mirror the type changes in `dashboard/src/types.ts`. Update `src/review-endpoints.test.ts` for the three scopes and the conversation route. Run `npm test`, `npm run typecheck`, `npm run lint`.
 
-- [x] Create the `pr-file-analyst` agent definition at `pr-map-plugin/agents/pr-file-analyst.md`. Read `understand-anything-plugin/agents/graph-reviewer.md` from `github.com/Egonex-AI/Understand-Anything` (via `gh api`) first to match the frontmatter/format. The agent is a focused single-file PR reviewer: given a file path, its diff, its content, and its graph neighbors, it returns ONLY a JSON object matching `EnrichmentResult` from `src/merge-enrichment.ts` — `summary`, `edgeWhys` (edgeId → plain-language why), `insights` ({risks, suspectedBugs, testsToCheck, impact}), and optional `semanticEdges` with honest `confidence` and a `why`, flagging uncertainty. Document the exact schema in the agent body. No code, no test. Verify: the file exists and its YAML frontmatter parses (`python3 -c "import yaml,sys; yaml.safe_load(open('pr-map-plugin/agents/pr-file-analyst.md').read().split('---')[1])"`).
+- [ ] Add theming infrastructure to the dashboard. Create `dashboard/src/theme.ts` (a small zustand store like `dashboard/src/store.ts`) that initializes from `window.matchMedia('(prefers-color-scheme: dark)')`, persists the choice to `localStorage`, and toggles a `dark` class on `document.documentElement`. Enable Tailwind v4 class-based dark mode in `dashboard/src/index.css`, and add a theme toggle control in the header rendered by `dashboard/src/App.tsx`. Verify with `npm --prefix dashboard run build`.
 
-- [x] Now that the bundle, the merge helper, and the analyst agent exist, rewrite `pr-map-plugin/skills/pr-map/SKILL.md` to orchestrate them. Replace all `$PR_MAP_HOME` references with `${CLAUDE_PLUGIN_ROOT}`. Steps: verify `gh auth`; resolve the PR ref and `gh pr checkout`; run `node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" <ref> "$(pwd)"` to write the static `graph.json`; dispatch `pr-file-analyst` subagents in parallel over the changed files (≤10 changed files → one per file; >10 → batches of ~5 files), writing each subagent's returned JSON to `<dataDir>/enrichment/<index>.json`; run `node "${CLAUDE_PLUGIN_ROOT}/dist/merge.js" "<dataDir>"` to fold them into `graph.json`; start `node "${CLAUDE_PLUGIN_ROOT}/dist/server.js" "<dataDir>"`. Keep the `EnrichmentResult`/graph contract documented inline. No automated test (it is agent orchestration). Verify: the file parses as Markdown with valid YAML frontmatter and contains no remaining `$PR_MAP_HOME` (`grep -c PR_MAP_HOME` is 0).
+- [ ] Now that the theme store and `dark` class toggle exist, add `dark:` Tailwind variants across the dashboard components so light and dark both read cleanly: `dashboard/src/graph-view.tsx`, `dashboard/src/file-node.tsx`, `dashboard/src/detail-panel.tsx`, `dashboard/src/diff-view.tsx`, `dashboard/src/sidebar.tsx`, `dashboard/src/review-controls.tsx`. Verify with `npm --prefix dashboard run build`.
 
-- [x] Add the marketplace manifest. Read `.claude-plugin/marketplace.json` from `github.com/Egonex-AI/Understand-Anything` (via `gh api`) for the schema, then create `.claude-plugin/marketplace.json` at the repo root listing the `pr-map` plugin located at `./pr-map-plugin`, with owner/metadata. Ensure `pr-map-plugin/.claude-plugin/plugin.json` keeps its name/description/version. Verify: both JSON files parse (`python3 -c "import json; json.load(open('.claude-plugin/marketplace.json'))"`) and the plugin `source`/path resolves to an existing directory.
+- [ ] Now that theming exists, restructure the review panel. In `dashboard/src/detail-panel.tsx` add a tab bar with Diff, Insights, and Conversation tabs (track the active tab in `dashboard/src/store.ts`). Move the verdict submit out of `dashboard/src/review-controls.tsx` into a "Finish review" tray opened from the header (`dashboard/src/App.tsx`): a summary textarea bound to a new `setSummary` call plus Approve/Request changes/Comment radios and submit, showing a pending-comment count from `/api/review/pending`. Update `dashboard/src/review-api.ts` with `setSummary(body)` and keep `submit(event)` driving the review body from `summaryBody`. Verify with `npm --prefix dashboard run build`.
 
-- [x] Now that the server writes a PID file, add the cleanup hook. Create `pr-map-plugin/hooks/cleanup-server.sh` (executable) that reads `${TMPDIR:-/tmp}/pr-map-server.pid`, and if the PID is running, kills it and removes the file. Register it as a `SessionEnd` hook in `pr-map-plugin/.claude-plugin/plugin.json` (or a `pr-map-plugin/hooks/hooks.json` if that is the plugin convention — match what the Claude Code plugin schema expects). No test. Verify: the script is executable and runs without error when no pid file exists (`bash pr-map-plugin/hooks/cleanup-server.sh; echo $?` is 0), and the plugin.json/hooks.json parses as JSON.
+- [ ] Now that the panel is tabbed, make `dashboard/src/diff-view.tsx` post GitHub-style comments. On line hover show a "+" affordance to comment on that line; support selecting a multi-line range (shift-click from a first-clicked line) producing `startLine`/`line` with `side`/`startSide`; add a "Comment on file" button in the diff header producing a `scope:'file'` comment. Update the existing `addComment` in `dashboard/src/review-api.ts` to the new signature `addComment({ scope, path, line?, startLine?, side?, startSide?, body })` and wire all three affordances to it. Render the file's pending comments as inline threads. Verify with `npm --prefix dashboard run build`.
 
-- [x] Now that `insights` exists in the contract, add the "Review insights" section to the dashboard detail panel. In `dashboard/src/detail-panel.tsx` add a section (following the existing "Connections" section markup in that file) that, when `node.insights` is present, lists `risks`, `suspectedBugs`, `testsToCheck`, and the `impact` note. Add a sample `insights` block (with at least one `risk` and one `suspectedBug`) to one PR node in `dashboard/src/__fixtures__/graph.json` so the section renders. No test (UI). Verify: `npm --prefix dashboard run build` passes.
+- [ ] Now that line/file comments work, add the Conversation tab content in `dashboard/src/detail-panel.tsx`: list and add standalone PR comments via a new `dashboard/src/review-api.ts` `addConversationComment(body)` hitting `POST /api/review/conversation` (posts immediately). In `dashboard/src/graph-view.tsx` label each edge with its `affectedSymbol` when present (fall back to `kind`), and show the `hiddenNeighborCount` from the graph as a passive note ("N importers with no affected symbols, hidden"). Ensure `dashboard/src/types.ts` mirrors the final `PrGraph` and comment types. Verify with `npm --prefix dashboard run build`.
 
-- [x] Now that the insights section and the fixture insights exist, add a node-level risk indicator. In `dashboard/src/file-node.tsx` add a `hasRisk: boolean` field to `FileNodeData` and render a small red dot/border when it is true (follow the existing class-based styling in that file). In `dashboard/src/graph-view.tsx` `buildFlow`, set each node's `hasRisk` as `Boolean(node.insights && node.insights.risks.length + node.insights.suspectedBugs.length > 0)`. No test (UI). Verify: `npm --prefix dashboard run build` passes.
-
-- [x] Run full verification: `npx tsc --noEmit`, `npx eslint .`, `npx vitest run`, `npm --prefix dashboard run build`, and `npm run build:plugin` (which refreshes and must leave `pr-map-plugin/dist/` + `pr-map-plugin/dashboard-dist/` current — commit the refreshed artifacts). Then one end-to-end check: from a checkout of a small real PR, run `node pr-map-plugin/dist/cli.js <ref> "$(pwd)"`, hand-write one `enrichment/0.json`, run `node pr-map-plugin/dist/merge.js "<dataDir>"`, start `node pr-map-plugin/dist/server.js "<dataDir>"`, and confirm `/api/graph` returns a node carrying `insights`. Fix any failures.
+- [ ] Run full verification and refresh the committed plugin bundle: `npm run typecheck`, `npm run lint`, `npm test`, `npm --prefix dashboard run build`, then `npm run build:plugin` (regenerates `pr-map-plugin/dist/*` and `pr-map-plugin/dashboard-dist/`). Fix any failures. Then run a bundled end-to-end smoke against a checked-out PR: `node pr-map-plugin/dist/cli.js <ref> "$(pwd)"` and confirm the printed JSON shows a non-zero `hiddenNeighborCount` and fewer nodes than before. Commit the refreshed bundle.
