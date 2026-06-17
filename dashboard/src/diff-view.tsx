@@ -1,4 +1,32 @@
 import { Highlight, themes } from 'prism-react-renderer';
+import { useSelection } from './store';
+
+interface DiffLineMeta {
+  newLine: number | null;
+}
+
+// Walks the unified-diff hunks to assign each rendered row its new-file line number.
+// Added/context rows get a line you can comment on; removed rows and hunk headers do not.
+function computeLineMeta(patch: string): DiffLineMeta[] {
+  const meta: DiffLineMeta[] = [];
+  let newLine = 0;
+  for (const text of patch.split('\n')) {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(text);
+    if (hunk) {
+      newLine = Number.parseInt(hunk[1], 10);
+      meta.push({ newLine: null });
+    } else if (text.startsWith('-') && !text.startsWith('---')) {
+      meta.push({ newLine: null });
+    } else if (text.startsWith('+') && !text.startsWith('+++')) {
+      meta.push({ newLine });
+      newLine += 1;
+    } else {
+      meta.push({ newLine });
+      newLine += 1;
+    }
+  }
+  return meta;
+}
 
 function lineBackground(text: string): string {
   if (text.startsWith('+') && !text.startsWith('+++')) return 'bg-green-50';
@@ -8,22 +36,36 @@ function lineBackground(text: string): string {
 }
 
 export function DiffView({ patch }: { patch: string }) {
+  const selectedLine = useSelection((state) => state.selectedLine);
+  const setLine = useSelection((state) => state.setLine);
+  const lineMeta = computeLineMeta(patch);
+
   return (
     <Highlight code={patch} language="diff" theme={themes.github}>
       {({ tokens, getLineProps, getTokenProps }) => (
-        <pre className="overflow-auto rounded border border-slate-200 p-2 font-mono text-[11px] leading-4">
+        <pre className="overflow-auto rounded border border-slate-200 font-mono text-[11px] leading-4">
           {tokens.map((line, lineIndex) => {
             const text = line.map((token) => token.content).join('');
+            const newLine = lineMeta[lineIndex]?.newLine ?? null;
+            const isSelected = newLine !== null && newLine === selectedLine;
             const lineProps = getLineProps({ line });
             return (
               <div
                 key={lineIndex}
                 {...lineProps}
-                className={`${lineProps.className ?? ''} ${lineBackground(text)}`}
+                onClick={() => newLine !== null && setLine(isSelected ? null : newLine)}
+                className={`${lineProps.className ?? ''} flex ${lineBackground(text)} ${
+                  newLine !== null ? 'cursor-pointer hover:bg-amber-100' : ''
+                } ${isSelected ? 'ring-1 ring-inset ring-amber-400' : ''}`}
               >
-                {line.map((token, tokenIndex) => (
-                  <span key={tokenIndex} {...getTokenProps({ token })} />
-                ))}
+                <span className="w-8 shrink-0 select-none pr-2 text-right text-slate-400">
+                  {newLine ?? ''}
+                </span>
+                <span className="flex-1">
+                  {line.map((token, tokenIndex) => (
+                    <span key={tokenIndex} {...getTokenProps({ token })} />
+                  ))}
+                </span>
               </div>
             );
           })}

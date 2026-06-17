@@ -1,6 +1,8 @@
+import { useState } from 'react';
 import type { GraphEdge, PrGraph } from './types';
 import { useSelection } from './store';
 import { DiffView } from './diff-view';
+import { reviewApi } from './review-api';
 
 function originBadge(edge: GraphEdge): string {
   return edge.origin === 'llm'
@@ -8,43 +10,63 @@ function originBadge(edge: GraphEdge): string {
     : 'border-slate-300 bg-slate-50 text-slate-600';
 }
 
-export function DetailPanel({ graph }: { graph: PrGraph }) {
-  const selectedNodeId = useSelection((state) => state.selectedNodeId);
-  const select = useSelection((state) => state.select);
+interface DetailPanelProps {
+  graph: PrGraph;
+  onChange: () => void;
+  setStatus: (status: string | null) => void;
+}
 
-  if (!selectedNodeId) return null;
+export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
+  const selectedNodeId = useSelection((state) => state.selectedNodeId);
+  const selectedLine = useSelection((state) => state.selectedLine);
+  const [body, setBody] = useState('');
 
   const node = graph.nodes.find((candidate) => candidate.id === selectedNodeId);
-  if (!node) return null;
+  if (!node) {
+    return (
+      <p className="text-xs text-slate-400">
+        Select a file node to see its connections, diff, and to comment.
+      </p>
+    );
+  }
 
   const connectedEdges = graph.edges.filter(
     (edge) => edge.source === node.id || edge.target === node.id,
   );
+  const inlineLine = node.inPr && selectedLine !== null ? selectedLine : undefined;
+  const isInline = inlineLine !== undefined;
+
+  const submitComment = async () => {
+    if (!body.trim()) return;
+    try {
+      await reviewApi.addComment({
+        path: node.path,
+        line: inlineLine,
+        side: isInline ? 'RIGHT' : undefined,
+        body,
+      });
+      setBody('');
+      setStatus(null);
+      onChange();
+    } catch (error) {
+      setStatus(`Add comment failed: ${(error as Error).message}`);
+    }
+  };
 
   return (
-    <aside className="absolute right-0 top-0 z-20 flex h-full w-96 flex-col gap-3 overflow-auto border-l border-slate-200 bg-white p-4 shadow-lg">
-      <div className="flex items-start justify-between gap-2">
-        <div>
-          <div className="font-mono text-sm font-semibold text-slate-800">{node.path}</div>
-          <div className="text-[11px] text-slate-500">
-            {node.language}
-            {node.inPr ? ` · ${node.status ?? 'changed'}` : ' · neighbor (not in this PR)'}
-            {node.inPr && node.additions !== undefined
-              ? ` · +${node.additions} / -${node.deletions ?? 0}`
-              : ''}
-          </div>
+    <section className="flex flex-col gap-3">
+      <div>
+        <div className="font-mono text-sm font-semibold text-slate-800">{node.path}</div>
+        <div className="text-[11px] text-slate-500">
+          {node.language}
+          {node.inPr ? ` · ${node.status ?? 'changed'}` : ' · neighbor (not in this PR)'}
+          {node.inPr && node.additions !== undefined
+            ? ` · +${node.additions} / -${node.deletions ?? 0}`
+            : ''}
         </div>
-        <button
-          onClick={() => select(null)}
-          className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-100"
-        >
-          Close
-        </button>
       </div>
 
-      {node.summary ? (
-        <p className="text-xs text-slate-700">{node.summary}</p>
-      ) : null}
+      {node.summary ? <p className="text-xs text-slate-700">{node.summary}</p> : null}
 
       <div>
         <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
@@ -54,16 +76,13 @@ export function DetailPanel({ graph }: { graph: PrGraph }) {
           {connectedEdges.map((edge) => {
             const isSource = edge.source === node.id;
             const other = isSource ? edge.target : edge.source;
-            const arrow = isSource ? '→' : '←';
             return (
               <li key={edge.id} className="rounded border border-slate-200 p-2 text-xs">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-slate-700">
-                    {arrow} {other}
+                    {isSource ? '→' : '←'} {other}
                   </span>
-                  <span
-                    className={`rounded border px-1 text-[10px] ${originBadge(edge)}`}
-                  >
+                  <span className={`rounded border px-1 text-[10px] ${originBadge(edge)}`}>
                     {edge.origin} · {edge.confidence}
                   </span>
                 </div>
@@ -82,11 +101,27 @@ export function DetailPanel({ graph }: { graph: PrGraph }) {
       {node.inPr && node.patch ? (
         <div>
           <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-            Diff
+            Diff {selectedLine !== null ? `· commenting on line ${selectedLine}` : '· click a line to comment inline'}
           </div>
           <DiffView patch={node.patch} />
         </div>
       ) : null}
-    </aside>
+
+      <div className="flex flex-col gap-1">
+        <textarea
+          value={body}
+          onChange={(event) => setBody(event.target.value)}
+          placeholder={isInline ? `Comment on ${node.path}:${selectedLine}` : `General comment on ${node.path}`}
+          className="h-16 rounded border border-slate-300 p-2 text-xs"
+        />
+        <button
+          onClick={submitComment}
+          disabled={!body.trim()}
+          className="self-start rounded bg-slate-800 px-3 py-1 text-xs text-white disabled:opacity-40"
+        >
+          {isInline ? `Add inline comment (line ${selectedLine})` : 'Add general comment'}
+        </button>
+      </div>
+    </section>
   );
 }

@@ -100,3 +100,11 @@ EXECUTION NOTES (appended per task)
   the inline comments array and line===undefined to the review body. submit clears pending ONLY on
   ok. Replies (POST /reply) call gh immediately, not batched. Verified end-to-end with curl that a
   posted comment persists to pending-review.json.
+- Task 13: App now fetches GET /api/graph at runtime and falls back to the checked-in fixture if
+  that fails (so the static build still renders standalone). Layout is flex: GraphView (flex-1) +
+  always-visible Sidebar (w-96). Sidebar owns pending state + refresh and passes them to DetailPanel
+  (per-node comment composer) and ReviewControls (pending list/delete, reply form, submit verdicts
+  with a two-click confirm). DiffView lines are clickable: new-file line numbers are computed by
+  walking @@ hunks; clicking sets selectedLine in the zustand store -> the composer posts an inline
+  comment (else general). Submit is gated behind an explicit confirm click. Dashboard mirrors
+  ReviewState/PendingComment/ReviewEvent in dashboard/src/types.ts.

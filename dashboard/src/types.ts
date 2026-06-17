@@ -46,3 +46,21 @@ export interface PrGraph {
   edges: GraphEdge[];
   generatedAt: string;
 }
+
+export type CommentSide = 'LEFT' | 'RIGHT';
+export type ReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
+
+export interface PendingComment {
+  id: string;
+  path: string;
+  line?: number;
+  side?: CommentSide;
+  body: string;
+  inReplyTo?: number;
+}
+
+export interface ReviewState {
+  prNumber: number;
+  comments: PendingComment[];
+  generalBody?: string;
+}
