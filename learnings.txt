@@ -46,3 +46,9 @@ USER CODING PREFERENCES (from CLAUDE.md)
 - Tests are liability: minimum tests, maximum value. Test logic units (gh-client, edge
   detection, review endpoints) with injected fakes/fixtures. Do NOT test pure UI.
 - No Claude attribution in commits or PRs.
+
+EXECUTION NOTES (appended per task)
+- Task 1: ESLint v9 flat config via `typescript-eslint` + `@eslint/js`; root config ignores
+  `dashboard/**` so the dashboard (React) lints separately. `tsconfig.json` uses NodeNext +
+  `include: ["src"]`; needs at least one .ts file or tsc errors "no inputs". `tseslint.configs.recommended`
+  (not type-checked) avoids needing parserOptions.project. express pinned ^4 with @types/express ^4.
