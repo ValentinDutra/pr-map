@@ -11,7 +11,6 @@
   "dependencies": {
     "@dagrejs/dagre": "^1.1.4",
     "@xyflow/react": "^12.3.5",
-    "prism-react-renderer": "^2.4.1",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zustand": "^5.0.2"

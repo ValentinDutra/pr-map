@@ -22,4 +22,10 @@ describe('javascript/typescript import resolution', () => {
   it('ignores bare (external) specifiers', () => {
     expect(rule?.resolve('express', 'src/app.ts', repoFiles)).toEqual([]);
   });
+
+  it('strips a bundler query suffix before resolving', () => {
+    expect(rule?.resolve('./result.js?worker', 'src/retry.ts', repoFiles)).toContain(
+      'src/result.ts',
+    );
+  });
 });

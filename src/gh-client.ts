@@ -93,9 +93,10 @@ export function createGhClient(
     },
 
     getFileContent(path, ref) {
+      const encodedPath = path.split('/').map(encodeURIComponent).join('/');
       return run([
         'api',
-        `repos/{owner}/{repo}/contents/${path}?ref=${ref}`,
+        `repos/{owner}/{repo}/contents/${encodedPath}?ref=${encodeURIComponent(ref)}`,
         '-H',
         'Accept: application/vnd.github.raw',
       ]);
@@ -202,7 +203,8 @@ function mapStatus(githubStatus: string): NodeStatus {
 function parseRepoFromUrl(
   url: string,
 ): Result<{ owner: string; repo: string }, GhError> {
-  const match = /github\.com\/([^/]+)\/([^/]+)\/pull\/\d+/.exec(url);
+  // Host-agnostic so GitHub Enterprise URLs parse too.
+  const match = /([^/]+)\/([^/]+)\/pull\/\d+/.exec(url);
   if (!match) {
     return err({ message: `Could not parse owner/repo from PR url: ${url}` });
   }
@@ -245,6 +247,9 @@ export function createDefaultExecutor(): CommandExecutor {
           );
         }
       });
+      // Guard against an async stream error (e.g. EPIPE when gh exits early) so it
+      // surfaces as a Result via the 'error'/'close' handlers instead of crashing.
+      child.stdin.on('error', () => undefined);
       if (stdin !== undefined) {
         child.stdin.write(stdin);
       }

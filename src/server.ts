@@ -35,6 +35,11 @@ export function createApp(deps: ServerDeps): Express {
 
   app.use('/api/review', createReviewRouter({ ghClient: deps.ghClient, store: deps.store }));
 
+  // Any unmatched /api/* path returns JSON 404 instead of falling through to the SPA HTML.
+  app.use('/api', (_request, response) => {
+    response.status(404).json({ error: 'Not found' });
+  });
+
   app.use(express.static(DASHBOARD_DIST));
   app.get('*', (_request, response) => {
     response.sendFile(join(DASHBOARD_DIST, 'index.html'));

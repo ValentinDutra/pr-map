@@ -12,10 +12,14 @@ export function App() {
   useEffect(() => {
     // Served by the pr-map server this returns the real PR graph; running the static
     // build alone (no server) falls back to the checked-in fixture.
-    fetch('/api/graph')
+    const controller = new AbortController();
+    fetch('/api/graph', { signal: controller.signal })
       .then((response) => (response.ok ? response.json() : Promise.reject(new Error('no graph'))))
       .then((data: PrGraph) => setGraph(data))
-      .catch(() => setGraph(fixtureGraph));
+      .catch((error: unknown) => {
+        if ((error as Error).name !== 'AbortError') setGraph(fixtureGraph);
+      });
+    return () => controller.abort();
   }, []);
 
   if (!graph) {

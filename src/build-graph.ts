@@ -120,38 +120,59 @@ function importPatternsFor(prPath: string): string[] {
   );
 }
 
+export interface IncomingTarget {
+  path: string;
+  previousPath?: string;
+}
+
 export function addIncomingEdges(
   nodes: GraphNode[],
-  prFilePaths: string[],
+  prFiles: IncomingTarget[],
   repoFiles: Set<string>,
   gitGrep: GitGrep,
   readContent: ReadContent,
 ): GraphParts {
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
   const edgesById = new Map<string, GraphEdge>();
-  const prFileSet = new Set(prFilePaths);
+  const prFileSet = new Set(prFiles.map((file) => file.path));
 
-  for (const prPath of prFilePaths) {
+  for (const prFile of prFiles) {
+    const targetPath = prFile.path;
+    // A renamed file may still be imported under its old path by files this PR did
+    // not touch, so search and confirm against both names.
+    const names = prFile.previousPath
+      ? [prFile.path, prFile.previousPath]
+      : [prFile.path];
+    // The old path of a renamed file is no longer on disk, so add it to the set the
+    // resolver checks; otherwise an importer still using the old path resolves to nothing.
+    const confirmFiles = new Set(repoFiles);
+    for (const name of names) confirmFiles.add(name);
+
     const candidates = new Set<string>();
-    for (const pattern of importPatternsFor(prPath)) {
-      for (const match of gitGrep(pattern)) {
-        candidates.add(match);
+    for (const name of names) {
+      for (const pattern of importPatternsFor(name)) {
+        for (const match of gitGrep(pattern)) {
+          candidates.add(match);
+        }
       }
     }
+
     for (const candidatePath of candidates) {
-      if (candidatePath === prPath || prFileSet.has(candidatePath)) continue;
+      if (candidatePath === targetPath || prFileSet.has(candidatePath)) continue;
       const rule = findRule(candidatePath);
       if (!rule) continue;
       const content = readContent(candidatePath);
       if (content === undefined) continue;
-      const importsThePrFile = rule
-        .extractSpecifiers(content)
-        .some((specifier) => rule.resolve(specifier, candidatePath, repoFiles).includes(prPath));
-      if (!importsThePrFile) continue;
+      const resolvedTargets = new Set(
+        rule.extractSpecifiers(content).flatMap((specifier) =>
+          rule.resolve(specifier, candidatePath, confirmFiles),
+        ),
+      );
+      if (!names.some((name) => resolvedTargets.has(name))) continue;
       ensureNeighbor(nodesById, candidatePath);
       addEdge(edgesById, {
         source: candidatePath,
-        target: prPath,
+        target: targetPath,
         kind: 'import',
         direction: 'incoming',
         origin: 'static',
@@ -180,10 +201,9 @@ export function assembleGraph(
 ): PrGraph {
   const prNodes = buildNodes(rawPr);
   const outgoing = addOutgoingEdges(prNodes, rawPr, repoFiles);
-  const prFilePaths = rawPr.files.map((file) => file.path);
   const incoming = addIncomingEdges(
     outgoing.nodes,
-    prFilePaths,
+    rawPr.files,
     repoFiles,
     gitGrep,
     readContent,

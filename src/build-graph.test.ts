@@ -109,7 +109,7 @@ describe('addOutgoingEdges', () => {
 
 describe('addIncomingEdges', () => {
   const prNodes = buildNodes(sampleRawPr);
-  const prFilePaths = sampleRawPr.files.map((file) => file.path);
+  const prFiles = sampleRawPr.files;
 
   // A confirmed importer of lib/db.ts and a file that merely mentions "db".
   const candidateContent: Record<string, string> = {
@@ -123,7 +123,7 @@ describe('addIncomingEdges', () => {
   it('adds an incoming edge from a confirmed importer of a PR file', () => {
     const { edges } = addIncomingEdges(
       prNodes,
-      prFilePaths,
+      prFiles,
       sampleRepoFiles,
       gitGrep,
       readContent,
@@ -143,7 +143,7 @@ describe('addIncomingEdges', () => {
   it('drops grep matches that do not actually import the PR file', () => {
     const { nodes, edges } = addIncomingEdges(
       prNodes,
-      prFilePaths,
+      prFiles,
       sampleRepoFiles,
       gitGrep,
       readContent,
@@ -154,6 +154,32 @@ describe('addIncomingEdges', () => {
     expect(nodes.find((node) => node.id === 'src/caller.ts')).toMatchObject({
       inPr: false,
     });
+  });
+
+  it('finds importers that still reference a renamed file by its old path', () => {
+    const renamedNodes = buildNodes({
+      ...sampleRawPr,
+      files: [
+        { path: 'lib/database.ts', previousPath: 'lib/db.ts', status: 'renamed', additions: 1, deletions: 1 },
+      ],
+    });
+    const repoFiles = new Set(['lib/database.ts', 'src/legacy.ts']);
+    const grep = (pattern: string): string[] =>
+      pattern === 'lib/db' ? ['src/legacy.ts'] : [];
+    const read = (path: string): string | undefined =>
+      path === 'src/legacy.ts' ? "import { db } from '../lib/db';\n" : undefined;
+
+    const { edges } = addIncomingEdges(
+      renamedNodes,
+      [{ path: 'lib/database.ts', previousPath: 'lib/db.ts' }],
+      repoFiles,
+      grep,
+      read,
+    );
+
+    expect(edges).toEqual([
+      expect.objectContaining({ source: 'src/legacy.ts', target: 'lib/database.ts' }),
+    ]);
   });
 });
 

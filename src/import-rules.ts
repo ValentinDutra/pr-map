@@ -30,7 +30,9 @@ const javascriptRule: ImportRule = {
   },
   resolve(specifier, fromPath, repoFiles) {
     if (!specifier.startsWith('.')) return [];
-    const base = path.normalize(path.join(path.dirname(fromPath), specifier));
+    // Drop bundler-style query/hash suffixes, e.g. './worker.js?worker'.
+    const cleanSpecifier = specifier.replace(/[?#].*$/, '');
+    const base = path.normalize(path.join(path.dirname(fromPath), cleanSpecifier));
     // Under NodeNext, a TypeScript import written as './x.js' actually resolves to
     // './x.ts'. Strip a trailing JS/TS extension to a stem, then try every known
     // extension and index file so '.js' specifiers map to their '.ts' source.

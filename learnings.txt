@@ -127,3 +127,25 @@ EXECUTION NOTES (appended per task)
   incoming edges (blast radius), agent enrichment filled summary/why, an inline comment + a COMMENT
   review posted to GitHub (verified via gh api), then PR/branch/.pr-map cleaned up. NOTE: GitHub
   forbids APPROVE on your own PR, so self-tests must use the COMMENT verdict.
+- Bug-fix round (3 parallel review agents + empirical checks). Confirmed NON-bugs: gh `--paginate`
+  merges JSON arrays (listChangedFiles safe); retry has no off-by-one; prism diff line alignment ok.
+  FIXED real bugs:
+  * gh-client.getFileContent now percent-encodes path segments + ref (spaces/special chars 404'd and
+    silently dropped content -> missing edges). parseRepoFromUrl is host-agnostic (GHE). stdin gets an
+    'error' listener so EPIPE on early gh exit can't crash.
+  * import-rules.resolve strips bundler query/hash suffixes ('./x.js?worker').
+  * build-graph.addIncomingEdges takes the PR file objects (not just paths) and, for renamed files,
+    also searches/confirms against previousPath using an augmented file set (old path isn't on disk).
+  * review-endpoints: ReviewStore now has update()/clear() (no save) with serialized mutations
+    (promise chain) + atomic writes (tmp+rename) to kill the lost-update race and corruption. submit
+    refuses empty COMMENT/REQUEST_CHANGES reviews and prNumber<=0 before calling GitHub (avoids 422/404).
+    Async route handlers wrapped (Express 4 doesn't catch async throws -> requests used to hang). Inline
+    comment requires a path; reply requires an integer commentId.
+  * server: unmatched /api/* now returns JSON 404 instead of the SPA index.html (HTML 200).
+  * dashboard graph-view: nodes are draggable now (useNodesState/useEdgesState + onNodesChange) — without
+    it React Flow v12 warns and won't move nodes. App fetch uses AbortController (StrictMode double-fetch).
+    confidence shown as a percentage.
+  * dashboard diff-view: dropped prism-react-renderer entirely — its bundled Prism has NO 'diff' grammar,
+    so highlighting was dead; render plain lines with +/- backgrounds + clickable gutter. Uninstalled the
+    dep (also shrinks the bundle).
+  Re-validated read-only e2e (slugify#75) after fixes: no regressions; /api/nope -> 404 JSON. 32 tests.

@@ -13,9 +13,9 @@ function memoryStore(prNumber: number): ReviewStore {
   let state: ReviewState = { prNumber, comments: [] };
   return {
     load: () => Promise.resolve(state),
-    save: (next) => {
-      state = next;
-      return Promise.resolve();
+    update: (mutator) => {
+      state = mutator(state);
+      return Promise.resolve(state);
     },
     clear: () => {
       state = { prNumber, comments: [] };
@@ -102,5 +102,26 @@ describe('submitReview', () => {
 
     expect(result.ok).toBe(false);
     expect((await store.load()).comments).toHaveLength(1);
+  });
+
+  it('refuses an empty COMMENT review without calling GitHub', async () => {
+    const store = memoryStore(7);
+    const { client, submissions } = fakeGhClient(ok('created'));
+
+    const result = await submitReview(store, client, 'COMMENT');
+
+    expect(result.ok).toBe(false);
+    expect(submissions).toHaveLength(0);
+  });
+
+  it('refuses to submit when the PR number is unknown', async () => {
+    const store = memoryStore(0);
+    await addComment(store, { path: 'a.ts', line: 1, body: 'x' }, sequentialIds());
+    const { client, submissions } = fakeGhClient(ok('created'));
+
+    const result = await submitReview(store, client, 'COMMENT');
+
+    expect(result.ok).toBe(false);
+    expect(submissions).toHaveLength(0);
   });
 });

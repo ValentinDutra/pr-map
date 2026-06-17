@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Background,
   Controls,
   MiniMap,
   ReactFlow,
+  useEdgesState,
+  useNodesState,
   type Edge,
   type NodeTypes,
 } from '@xyflow/react';
@@ -13,6 +15,10 @@ import { FileNode, type FileFlowNode } from './file-node';
 import { useSelection } from './store';
 
 const nodeTypes: NodeTypes = { file: FileNode };
+
+function formatConfidence(confidence: number): string {
+  return `${Math.round(confidence * 100)}%`;
+}
 
 function buildFlow(
   graph: PrGraph,
@@ -39,7 +45,10 @@ function buildFlow(
     id: edge.id,
     source: edge.source,
     target: edge.target,
-    label: edge.origin === 'llm' ? `${edge.kind} ~${edge.confidence}` : edge.kind,
+    label:
+      edge.origin === 'llm'
+        ? `${edge.kind} ~${formatConfidence(edge.confidence)}`
+        : edge.kind,
     animated: edge.direction === 'incoming',
     style:
       edge.origin === 'llm'
@@ -53,7 +62,16 @@ function buildFlow(
 export function GraphView({ graph }: { graph: PrGraph }) {
   const [query, setQuery] = useState('');
   const select = useSelection((state) => state.select);
-  const { nodes, edges } = useMemo(() => buildFlow(graph, query), [graph, query]);
+  const layout = useMemo(() => buildFlow(graph, query), [graph, query]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<FileFlowNode>(layout.nodes);
+  const [edges, setEdges, onEdgesChange] = useEdgesState(layout.edges);
+
+  // Re-apply the dagre layout whenever the graph or search query changes; between
+  // those changes the user can freely drag nodes (onNodesChange keeps them in state).
+  useEffect(() => {
+    setNodes(layout.nodes);
+    setEdges(layout.edges);
+  }, [layout, setNodes, setEdges]);
 
   return (
     <div className="relative h-full w-full">
@@ -75,6 +93,8 @@ export function GraphView({ graph }: { graph: PrGraph }) {
         nodes={nodes}
         edges={edges}
         nodeTypes={nodeTypes}
+        onNodesChange={onNodesChange}
+        onEdgesChange={onEdgesChange}
         onNodeClick={(_, node) => select(node.id)}
         onPaneClick={() => select(null)}
         fitView

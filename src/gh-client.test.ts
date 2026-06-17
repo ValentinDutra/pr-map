@@ -105,6 +105,18 @@ describe('createGhClient', () => {
     });
   });
 
+  it('getFileContent percent-encodes path segments and the ref', async () => {
+    const { execute, calls } = recordingExecutor([ok('file body')]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    await client.getFileContent('src/my file.ts', 'feature/x');
+
+    expect(calls[0].args[0]).toBe('api');
+    expect(calls[0].args[1]).toBe(
+      'repos/{owner}/{repo}/contents/src/my%20file.ts?ref=feature%2Fx',
+    );
+  });
+
   it('retries a transient failure before succeeding', async () => {
     const { execute, calls } = recordingExecutor([
       err({ message: 'transient' }),

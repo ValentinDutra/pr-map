@@ -83,7 +83,7 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
                     {isSource ? '→' : '←'} {other}
                   </span>
                   <span className={`rounded border px-1 text-[10px] ${originBadge(edge)}`}>
-                    {edge.origin} · {edge.confidence}
+                    {edge.origin} · {Math.round(edge.confidence * 100)}%
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-500">
