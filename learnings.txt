@@ -168,3 +168,10 @@ V2 EXECUTION NOTES
   `{ "hooks": { "SessionEnd": [ { "hooks": [ { "type":"command", "command":"bash \"${CLAUDE_PLUGIN_ROOT}/hooks/cleanup-server.sh\"", "timeout":10 } ] } ] } }`.
   cleanup-server.sh kills the PID at ${TMPDIR:-/tmp}/pr-map-server.pid (matches node os.tmpdir()).
   Verified it kills a live server. Keep the script's +x bit committed.
+- Task 10: committing the plugin bundle made eslint lint the minified artifacts -> add
+  `pr-map-plugin/**` to eslint ignores. Plain `.mjs` build scripts need node globals declared in
+  eslint flat config (`files:['**/*.mjs'], languageOptions.globals:{console,process,URL}`) because
+  no-undef is on for JS (off for TS). After ANY dashboard/src change, re-run `npm run build:plugin`
+  to refresh committed `pr-map-plugin/dashboard-dist`. Full v2 verified: tsc/eslint 0, 34 tests,
+  dashboard build + build:plugin 0, and bundled e2e (slugify#75 + hand-written enrichment) shows a
+  node carrying insights via /api/graph.
