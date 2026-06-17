@@ -36,6 +36,13 @@ export const reviewApi = {
       body: JSON.stringify({ commentId, body }),
     }).then((response) => asJson<{ ok: boolean }>(response)),
 
+  setSummary: (body: string) =>
+    fetch('/api/review/summary', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    }).then((response) => asJson<ReviewState>(response)),
+
   submit: (event: ReviewEvent, body?: string) =>
     fetch('/api/review/submit', {
       method: 'POST',

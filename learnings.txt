@@ -210,3 +210,7 @@ V3 EXECUTION NOTES
 - Task 8: usePanelTab store (diff|insights|conversation, default diff) in store.ts. detail-panel split into
   tabs: Diff (diff+composer or neighbor message), Insights (summary+insights+connections), Conversation (placeholder,
   filled task 11). Node header stays above the tab bar.
+- Task 9: Finish-review tray lives in App.tsx header (absolute panel; header is relative). Flow: setSummary(body)
+  -> PUT /api/review/summary, then submit(event). Cross-panel refresh via useReviewRefresh store (bump on submit;
+  Sidebar useEffect deps include version). review-controls lost the verdict buttons (moved to tray); keeps pending
+  list + reply + delete and now shows scope "(file)" for file comments.

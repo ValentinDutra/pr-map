@@ -1,12 +1,6 @@
 import { useState } from 'react';
-import type { ReviewEvent, ReviewState } from './types';
+import type { ReviewState } from './types';
 import { reviewApi } from './review-api';
-
-const VERDICTS: { event: ReviewEvent; label: string; style: string }[] = [
-  { event: 'APPROVE', label: 'Approve', style: 'bg-green-600' },
-  { event: 'REQUEST_CHANGES', label: 'Request changes', style: 'bg-red-600' },
-  { event: 'COMMENT', label: 'Comment', style: 'bg-slate-600' },
-];
 
 interface ReviewControlsProps {
   pending: ReviewState | null;
@@ -16,7 +10,6 @@ interface ReviewControlsProps {
 }
 
 export function ReviewControls({ pending, refresh, status, setStatus }: ReviewControlsProps) {
-  const [confirmVerdict, setConfirmVerdict] = useState<ReviewEvent | null>(null);
   const [replyId, setReplyId] = useState('');
   const [replyBody, setReplyBody] = useState('');
 
@@ -28,21 +21,6 @@ export function ReviewControls({ pending, refresh, status, setStatus }: ReviewCo
       refresh();
     } catch (error) {
       setStatus(`Delete failed: ${(error as Error).message}`);
-    }
-  };
-
-  const submit = async (event: ReviewEvent) => {
-    if (confirmVerdict !== event) {
-      setConfirmVerdict(event);
-      return;
-    }
-    try {
-      await reviewApi.submit(event);
-      setConfirmVerdict(null);
-      setStatus(`Submitted review: ${event}`);
-      refresh();
-    } catch (error) {
-      setStatus(`Submit failed: ${(error as Error).message}`);
     }
   };
 
@@ -74,7 +52,11 @@ export function ReviewControls({ pending, refresh, status, setStatus }: ReviewCo
             <div>
               <div className="font-mono text-[11px] text-slate-600 dark:text-slate-400">
                 {comment.path}
-                {comment.line !== undefined ? `:${comment.line}` : ' (general)'}
+                {comment.scope === 'file'
+                  ? ' (file)'
+                  : comment.line !== undefined
+                    ? `:${comment.line}`
+                    : ''}
               </div>
               <div className="text-slate-700 dark:text-slate-200">{comment.body}</div>
             </div>
@@ -87,20 +69,6 @@ export function ReviewControls({ pending, refresh, status, setStatus }: ReviewCo
           </li>
         ))}
       </ul>
-
-      <div className="flex flex-wrap gap-2">
-        {VERDICTS.map((verdict) => (
-          <button
-            key={verdict.event}
-            onClick={() => submit(verdict.event)}
-            className={`rounded px-2 py-1 text-xs text-white ${verdict.style} ${
-              confirmVerdict === verdict.event ? 'ring-2 ring-amber-400' : ''
-            }`}
-          >
-            {confirmVerdict === verdict.event ? `Confirm ${verdict.label}` : verdict.label}
-          </button>
-        ))}
-      </div>
 
       <details className="text-xs">
         <summary className="cursor-pointer text-slate-500 dark:text-slate-400">Reply to an existing thread</summary>
