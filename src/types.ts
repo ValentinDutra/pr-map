@@ -58,12 +58,16 @@ export interface PrGraph {
 }
 
 export type CommentSide = 'LEFT' | 'RIGHT';
+export type CommentScope = 'line' | 'file';
 
 export interface PendingComment {
   id: string;
+  scope: CommentScope;
   path: string;
   line?: number;
+  startLine?: number;
   side?: CommentSide;
+  startSide?: CommentSide;
   body: string;
   inReplyTo?: number;
 }
@@ -71,5 +75,6 @@ export interface PendingComment {
 export interface ReviewState {
   prNumber: number;
   comments: PendingComment[];
-  generalBody?: string;
+  // The review summary body (the PR-level comment) submitted together with the verdict.
+  summaryBody?: string;
 }

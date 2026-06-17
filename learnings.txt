@@ -195,3 +195,10 @@ V3 EXECUTION NOTES
   File comments do NOT go in the bulk reviews endpoint -> createFileComment(prNumber,commitId,path,body) hits
   POST pulls/{n}/comments with subject_type:file + commit_id. getHeadSha trims gh stdout. createConversationComment
   -> issues/{n}/comments. Adding methods to GhClient broke the fakeGhClient in fetch-pr.test.ts -> add stubs there too.
+- Task 4: PendingComment now has scope:"line"|"file" + startLine/startSide; ReviewState.generalBody -> summaryBody.
+  buildSubmission only emits line comments (+ranges) and body=summaryBody. submitReview posts file comments
+  separately via getHeadSha+createFileComment, then the bulk review for verdict+summary+line comments.
+  Guards: REQUEST_CHANGES needs review content; COMMENT needs content OR >=1 file comment; APPROVE may be empty.
+  New routes: PUT /summary (setSummary), POST /conversation (immediate issue comment). Mirrored types in
+  dashboard/src/types.ts (also added affectedSymbol/hiddenNeighborCount). Dashboard build still green (no component
+  constructed PendingComment or used generalBody).

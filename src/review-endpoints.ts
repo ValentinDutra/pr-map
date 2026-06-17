@@ -2,9 +2,9 @@ import { Router, type Request, type Response } from 'express';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { type Result, err, isOk } from './result.js';
+import { type Result, err, ok, isOk } from './result.js';
 import type { GhClient, GhError, ReviewEvent, ReviewSubmission } from './gh-client.js';
-import type { ReviewState } from './types.js';
+import type { CommentScope, CommentSide, ReviewState } from './types.js';
 
 export interface ReviewStore {
   load(): Promise<ReviewState>;
@@ -13,9 +13,12 @@ export interface ReviewStore {
 }
 
 export interface AddCommentInput {
+  scope: CommentScope;
   path: string;
   line?: number;
-  side?: 'LEFT' | 'RIGHT';
+  startLine?: number;
+  side?: CommentSide;
+  startSide?: CommentSide;
   body: string;
 }
 
@@ -39,28 +42,32 @@ export function removeComment(store: ReviewStore, id: string): Promise<ReviewSta
   }));
 }
 
+export function setSummary(store: ReviewStore, summaryBody: string): Promise<ReviewState> {
+  return store.update((state) => ({ ...state, summaryBody }));
+}
+
 export function getPending(store: ReviewStore): Promise<ReviewState> {
   return store.load();
 }
 
+// The bulk review carries the verdict, the summary body, and line-scoped comments (with
+// optional multi-line ranges). File-scoped comments are posted separately at submit time.
 export function buildSubmission(
   state: ReviewState,
   event: ReviewEvent,
-  generalBody?: string,
+  summaryBody?: string,
 ): ReviewSubmission {
-  const inline = state.comments.filter((comment) => comment.line !== undefined);
-  const general = state.comments.filter((comment) => comment.line === undefined);
-  const bodyParts = [generalBody ?? state.generalBody, ...general.map((c) => c.body)].filter(
-    (part): part is string => Boolean(part),
-  );
+  const lineComments = state.comments.filter((comment) => comment.scope === 'line');
   return {
     event,
-    body: bodyParts.join('\n\n'),
-    comments: inline.map((comment) => ({
+    body: summaryBody ?? state.summaryBody ?? '',
+    comments: lineComments.map((comment) => ({
       path: comment.path,
-      line: comment.line,
-      side: comment.side,
       body: comment.body,
+      ...(comment.line !== undefined ? { line: comment.line } : {}),
+      ...(comment.side ? { side: comment.side } : {}),
+      ...(comment.startLine !== undefined ? { startLine: comment.startLine } : {}),
+      ...(comment.startSide ? { startSide: comment.startSide } : {}),
     })),
   };
 }
@@ -69,7 +76,7 @@ export async function submitReview(
   store: ReviewStore,
   ghClient: GhClient,
   event: ReviewEvent,
-  generalBody?: string,
+  summaryBody?: string,
 ): Promise<Result<string, GhError>> {
   const state = await store.load();
   if (state.prNumber <= 0) {
@@ -77,18 +84,49 @@ export async function submitReview(
       message: 'PR number is unknown; regenerate graph.json before submitting a review.',
     });
   }
-  const submission = buildSubmission(state, event, generalBody);
-  // GitHub rejects a COMMENT or REQUEST_CHANGES review with neither a body nor comments.
-  if (event !== 'APPROVE' && !submission.body && submission.comments.length === 0) {
+
+  const fileComments = state.comments.filter((comment) => comment.scope === 'file');
+  const lineComments = state.comments.filter((comment) => comment.scope === 'line');
+  const body = summaryBody ?? state.summaryBody ?? '';
+  const hasReviewContent = body !== '' || lineComments.length > 0;
+
+  // APPROVE may be empty; REQUEST_CHANGES always needs review content (GitHub requires a body);
+  // COMMENT needs review content unless it is carried entirely by file-level comments.
+  if (event === 'REQUEST_CHANGES' && !hasReviewContent) {
     return err({
-      message: 'A COMMENT or REQUEST_CHANGES review needs a body or at least one comment.',
+      message: 'A REQUEST_CHANGES review needs a body or at least one line comment.',
     });
   }
-  const result = await ghClient.createReview(state.prNumber, submission);
-  if (isOk(result)) {
-    await store.clear();
+  if (event === 'COMMENT' && !hasReviewContent && fileComments.length === 0) {
+    return err({
+      message: 'A COMMENT review needs a body or at least one comment.',
+    });
   }
-  return result;
+
+  // File-level comments are rejected by the bulk reviews endpoint, so post them individually
+  // against the head commit before submitting the review.
+  if (fileComments.length > 0) {
+    const headSha = await ghClient.getHeadSha(state.prNumber);
+    if (!isOk(headSha)) return headSha;
+    for (const fileComment of fileComments) {
+      const posted = await ghClient.createFileComment(
+        state.prNumber,
+        headSha.value,
+        fileComment.path,
+        fileComment.body,
+      );
+      if (!isOk(posted)) return posted;
+    }
+  }
+
+  if (event === 'APPROVE' || hasReviewContent) {
+    const submission = buildSubmission(state, event, body);
+    const result = await ghClient.createReview(state.prNumber, submission);
+    if (!isOk(result)) return result;
+  }
+
+  await store.clear();
+  return ok('submitted');
 }
 
 // --- File-backed store: serialized mutations + atomic writes (thin fs glue) ---
@@ -163,16 +201,33 @@ export function createReviewRouter(deps: ReviewRouterDeps): Router {
   router.post(
     '/comment',
     wrap(async (request, response) => {
-      const { path, line, side, body } = request.body as Partial<AddCommentInput>;
+      const { scope, path, line, startLine, side, startSide, body } =
+        request.body as Partial<AddCommentInput>;
       if (!body) {
         response.status(400).json({ error: 'body is required' });
         return;
       }
-      if (line !== undefined && !path) {
-        response.status(400).json({ error: 'path is required for an inline comment' });
+      if (scope !== 'line' && scope !== 'file') {
+        response.status(400).json({ error: "scope must be 'line' or 'file'" });
         return;
       }
-      const state = await addComment(deps.store, { path: path ?? '', line, side, body }, makeId);
+      if (!path) {
+        response.status(400).json({ error: 'path is required' });
+        return;
+      }
+      if (scope === 'line' && line === undefined) {
+        response.status(400).json({ error: 'line is required for a line comment' });
+        return;
+      }
+      if (startLine !== undefined && line !== undefined && startLine > line) {
+        response.status(400).json({ error: 'startLine must be <= line' });
+        return;
+      }
+      const state = await addComment(
+        deps.store,
+        { scope, path, line, startLine, side, startSide, body },
+        makeId,
+      );
       response.json(state);
     }),
   );
@@ -188,6 +243,32 @@ export function createReviewRouter(deps: ReviewRouterDeps): Router {
     '/comment/:id',
     wrap(async (request, response) => {
       response.json(await removeComment(deps.store, request.params.id));
+    }),
+  );
+
+  router.put(
+    '/summary',
+    wrap(async (request, response) => {
+      const { body } = request.body as { body?: string };
+      response.json(await setSummary(deps.store, body ?? ''));
+    }),
+  );
+
+  router.post(
+    '/conversation',
+    wrap(async (request, response) => {
+      const { body } = request.body as { body?: string };
+      if (!body) {
+        response.status(400).json({ error: 'body is required' });
+        return;
+      }
+      const state = await deps.store.load();
+      const result = await deps.ghClient.createConversationComment(state.prNumber, body);
+      if (isOk(result)) {
+        response.json({ ok: true });
+      } else {
+        response.status(502).json({ error: result.error.message });
+      }
     }),
   );
 
