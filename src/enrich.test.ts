@@ -107,4 +107,39 @@ describe('enrichGraph', () => {
     // One changed file -> one batch -> one provider call; the neighbor src/b.ts is not enriched.
     expect(calls).toBe(1);
   });
+
+  it('reports progress through onBatch with a cumulative completed count', async () => {
+    const many: PrGraph = {
+      ...graph,
+      nodes: Array.from({ length: 12 }, (_unused, index) => ({
+        id: `src/f${index}.ts`,
+        path: `src/f${index}.ts`,
+        language: 'typescript',
+        inPr: true,
+        patch: '@@ -1 +1 @@\n+x',
+      })),
+      edges: [],
+    };
+    const progress: { completed: number; total: number }[] = [];
+    await enrichGraph(many, {
+      provider: fixedProvider(ok('{ "files": [] }')),
+      onBatch: (_results, current) => {
+        progress.push(current);
+      },
+    });
+    // 12 changed files batch into 5 + 5 + 2 = 3 batches; each reports the same total once.
+    expect(progress.map((entry) => entry.total)).toEqual([3, 3, 3]);
+    expect(progress.map((entry) => entry.completed).sort((a, b) => a - b)).toEqual([1, 2, 3]);
+  });
+
+  it('still fires onBatch for a failed batch, with no results (partial-results path)', async () => {
+    const reported: number[] = [];
+    await enrichGraph(graph, {
+      provider: fixedProvider(err({ message: 'down' })),
+      onBatch: (results) => {
+        reported.push(results.length);
+      },
+    });
+    expect(reported).toEqual([0]);
+  });
 });
