@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { DetailTab } from './store';
 import type { ExistingDiscussion, GraphEdge, PrGraph, ReviewState } from './types';
 import { useSelection, usePanelTab } from './store';
+import { useViewedState } from './viewed-state';
 import { DiffView } from './diff-view';
 import { AiSuggestionBadge } from './ai-suggestion-badge';
 import { formatCommentTimestamp } from './format';
@@ -50,6 +51,8 @@ export function DetailPanel({ graph, pending, existing, onChange, setStatus }: D
   const selectedNodeId = useSelection((state) => state.selectedNodeId);
   const activeTab = usePanelTab((state) => state.activeTab);
   const setTab = usePanelTab((state) => state.setTab);
+  const viewedPaths = useViewedState((state) => state.viewedPaths);
+  const toggleViewed = useViewedState((state) => state.toggle);
   const [conversationBody, setConversationBody] = useState('');
   const [postedComments, setPostedComments] = useState<string[]>([]);
 
@@ -77,6 +80,13 @@ export function DetailPanel({ graph, pending, existing, onChange, setStatus }: D
   const connectedEdges = graph.edges.filter(
     (edge) => edge.source === node.id || edge.target === node.id,
   );
+  // Progress is measured against the files actually changed in this PR — neighbours pulled in
+  // for context are not something the reviewer needs to check off.
+  const changedFiles = graph.nodes.filter((candidate) => candidate.inPr);
+  const viewedChangedCount = changedFiles.filter((candidate) =>
+    viewedPaths.has(candidate.path),
+  ).length;
+  const isNodeViewed = viewedPaths.has(node.path);
   const fileComments = (pending?.comments ?? []).filter((comment) => comment.path === node.path);
   const existingFileComments = (existing?.reviewComments ?? []).filter(
     (comment) => comment.path === node.path,
@@ -85,8 +95,24 @@ export function DetailPanel({ graph, pending, existing, onChange, setStatus }: D
   return (
     <section className="flex flex-col gap-3">
       <div>
-        <div className="break-all font-mono text-base font-semibold text-slate-800 dark:text-slate-100">
-          {node.path}
+        <div className="flex items-start justify-between gap-2">
+          <div className="break-all font-mono text-base font-semibold text-slate-800 dark:text-slate-100">
+            {node.path}
+          </div>
+          {node.inPr ? (
+            <label
+              title="Mark this file as reviewed"
+              className="flex shrink-0 cursor-pointer select-none items-center gap-1.5 rounded border border-slate-300 px-2 py-1 text-xs font-medium text-slate-600 dark:border-slate-600 dark:text-slate-300"
+            >
+              <input
+                type="checkbox"
+                checked={isNodeViewed}
+                onChange={() => toggleViewed(node.path)}
+                className="h-3.5 w-3.5"
+              />
+              Viewed
+            </label>
+          ) : null}
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
           <span>{node.language}</span>
@@ -103,6 +129,11 @@ export function DetailPanel({ graph, pending, existing, onChange, setStatus }: D
             </>
           ) : null}
         </div>
+        {changedFiles.length > 0 ? (
+          <div className="mt-1 text-xs font-medium text-slate-500 dark:text-slate-400">
+            viewed {viewedChangedCount} of {changedFiles.length}
+          </div>
+        ) : null}
       </div>
 
       <div className="flex gap-2 border-b border-slate-200 text-sm dark:border-slate-700">
@@ -201,14 +232,25 @@ export function DetailPanel({ graph, pending, existing, onChange, setStatus }: D
 
       {activeTab === 'diff' ? (
         node.inPr && node.patch ? (
-          <DiffView
-            patch={node.patch}
-            path={node.path}
-            comments={fileComments}
-            existingComments={existingFileComments}
-            onChange={onChange}
-            setStatus={setStatus}
-          />
+          isNodeViewed ? (
+            <button
+              type="button"
+              onClick={() => toggleViewed(node.path)}
+              className="flex items-center gap-2 self-start rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-400"
+            >
+              <span className="font-medium text-green-700 dark:text-green-400">Viewed</span>
+              <span>— diff collapsed, expand</span>
+            </button>
+          ) : (
+            <DiffView
+              patch={node.patch}
+              path={node.path}
+              comments={fileComments}
+              existingComments={existingFileComments}
+              onChange={onChange}
+              setStatus={setStatus}
+            />
+          )
         ) : (
           <p className="text-sm text-slate-400 dark:text-slate-500">
             No diff — this file is a neighbor, not changed in this PR.
