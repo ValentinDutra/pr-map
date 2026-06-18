@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -139,34 +139,52 @@ function chunk<T>(items: T[], size: number): T[][] {
   return batches;
 }
 
+export interface BatchProgress {
+  completed: number;
+  total: number;
+}
+
 export interface EnrichDeps {
   provider: LlmProvider;
   concurrency?: number;
   log?: (message: string) => void;
+  // Called once per batch as it finishes (in completion order, not input order) with that batch's
+  // results and the running progress. Lets a caller persist partial output and report progress as
+  // the run proceeds. A failed batch still fires this with an empty result array.
+  onBatch?: (results: EnrichmentResult[], progress: BatchProgress) => void | Promise<void>;
 }
 
 // Drive enrichment over the PR's changed files. Batches like the skill (<=10 files -> one per
 // prompt; >10 -> batches of ~5), runs with bounded concurrency, and fails open per batch: a
-// provider or parse failure skips those files (logged) rather than aborting the whole run.
+// provider or parse failure skips those files (logged) rather than aborting the whole run. Each
+// batch reports through onBatch the moment it finishes, so the caller can stream progress and
+// persist partial results without waiting for the slowest batch.
 export async function enrichGraph(graph: PrGraph, deps: EnrichDeps): Promise<EnrichmentResult[]> {
   const changedNodes = graph.nodes.filter((node) => node.inPr);
   if (changedNodes.length === 0) return [];
   const batchSize = changedNodes.length <= 10 ? 1 : 5;
   const batches = chunk(changedNodes, batchSize);
+  let completed = 0;
 
   const perBatch = await mapWithConcurrency(batches, deps.concurrency ?? 4, async (batch) => {
     const label = batch.map((node) => node.path).join(', ');
+    let results: EnrichmentResult[] = [];
     const completion = await deps.provider.complete(buildPrompt(batch, graph));
     if (!isOk(completion)) {
       deps.log?.(`enrichment failed for ${label}: ${completion.error.message}`);
-      return [];
+    } else {
+      const parsed = parseEnrichmentResponse(completion.value);
+      if (!isOk(parsed)) {
+        deps.log?.(`could not parse enrichment for ${label}: ${parsed.error.message}`);
+      } else {
+        results = parsed.value;
+      }
     }
-    const parsed = parseEnrichmentResponse(completion.value);
-    if (!isOk(parsed)) {
-      deps.log?.(`could not parse enrichment for ${label}: ${parsed.error.message}`);
-      return [];
-    }
-    return parsed.value;
+    // Increment synchronously before the (possibly async) callback so progress counts can never
+    // race between concurrent batches.
+    completed += 1;
+    await deps.onBatch?.(results, { completed, total: batches.length });
+    return results;
   });
 
   return perBatch.flat();
@@ -196,22 +214,55 @@ export async function enrichFromDir(
     ? parsedConcurrency
     : 4;
 
+  // Start from a clean enrichment directory so a previous (possibly aborted) run's files never
+  // leak into this run's merge. Failing to prepare the directory is fatal — nothing could be
+  // written — so it surfaces as an error rather than a silent empty enrichment.
+  const enrichmentDir = join(dataDir, 'enrichment');
+  try {
+    await rm(enrichmentDir, { recursive: true, force: true });
+    await mkdir(enrichmentDir, { recursive: true });
+  } catch (error) {
+    return err({ message: `could not prepare ${enrichmentDir}: ${(error as Error).message}` });
+  }
+
+  const changedCount = graph.nodes.filter((node) => node.inPr).length;
+  console.warn(`pr-map: enriching ${changedCount} changed file(s) with concurrency ${concurrency}...`);
+
+  // Persist each batch as it finishes rather than all at the end, so an interrupted run still
+  // leaves usable partial enrichment on disk for the merge step. The cursor is advanced
+  // synchronously (before any await) so concurrent batches claim disjoint file indices. Per-file
+  // write failures are logged and skipped, never aborting the run — the same fail-open posture as
+  // the enrichment itself.
+  let writeCursor = 0;
   const results = await enrichGraph(graph, {
     provider: providerResult.value,
     concurrency,
     log: (message) => console.warn(`pr-map: ${message}`),
+    onBatch: async (batchResults, progress) => {
+      const startIndex = writeCursor;
+      writeCursor += batchResults.length;
+      // Capture the cumulative count synchronously (before the first await) so the progress line
+      // matches this batch's number even while other batches run concurrently and advance the
+      // shared cursor.
+      const filesThroughHere = writeCursor;
+      await Promise.all(
+        batchResults.map((result, offset) =>
+          writeFile(
+            join(enrichmentDir, `${startIndex + offset}.json`),
+            JSON.stringify(result, null, 2),
+            'utf8',
+          ).catch((error: unknown) => {
+            console.warn(
+              `pr-map: could not write enrichment for ${result.path}: ${(error as Error).message}`,
+            );
+          }),
+        ),
+      );
+      console.warn(
+        `pr-map: enriched ${progress.completed}/${progress.total} batch(es), ${filesThroughHere} file(s) written`,
+      );
+    },
   });
-
-  const enrichmentDir = join(dataDir, 'enrichment');
-  try {
-    await mkdir(enrichmentDir, { recursive: true });
-    for (let index = 0; index < results.length; index += 1) {
-      const filePath = join(enrichmentDir, `${index}.json`);
-      await writeFile(filePath, JSON.stringify(results[index], null, 2), 'utf8');
-    }
-  } catch (error) {
-    return err({ message: `could not write enrichment files: ${(error as Error).message}` });
-  }
 
   return ok({ enrichmentDir, written: results.length });
 }
