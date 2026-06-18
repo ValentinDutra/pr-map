@@ -186,6 +186,15 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       ]);
       if (!isOk(combinedStatusRaw)) return combinedStatusRaw;
       return parseChecks(checkRunsRaw.value, combinedStatusRaw.value);
+    },
+    async listCommits(prNumber) {
+      const raw = await run([
+        "api",
+        `repos/{owner}/{repo}/pulls/${prNumber}/commits`,
+        "--paginate"
+      ]);
+      if (!isOk(raw)) return raw;
+      return parseCommits(raw.value);
     }
   };
 }
@@ -232,6 +241,22 @@ function parseConversationComments(raw) {
       body: comment.body,
       author: comment.user?.login ?? "",
       createdAt: comment.created_at
+    }))
+  );
+}
+function parseCommits(raw) {
+  const parsed = parseJson(raw);
+  if (!isOk(parsed)) return parsed;
+  return ok(
+    parsed.value.map((commit) => ({
+      sha: commit.sha,
+      shortSha: commit.sha.slice(0, 7),
+      // Only the subject line; the body (after the first newline) is dropped for the list view.
+      message: commit.commit.message.split("\n")[0],
+      // The git-author name from the commit, falling back to the GitHub login when absent.
+      author: commit.commit.author?.name ?? commit.author?.login ?? "",
+      date: commit.commit.author?.date ?? "",
+      url: commit.html_url
     }))
   );
 }

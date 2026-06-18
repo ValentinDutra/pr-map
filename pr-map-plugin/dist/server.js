@@ -24587,6 +24587,15 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       ]);
       if (!isOk(combinedStatusRaw)) return combinedStatusRaw;
       return parseChecks(checkRunsRaw.value, combinedStatusRaw.value);
+    },
+    async listCommits(prNumber) {
+      const raw = await run([
+        "api",
+        `repos/{owner}/{repo}/pulls/${prNumber}/commits`,
+        "--paginate"
+      ]);
+      if (!isOk(raw)) return raw;
+      return parseCommits(raw.value);
     }
   };
 }
@@ -24633,6 +24642,22 @@ function parseConversationComments(raw) {
       body: comment.body,
       author: comment.user?.login ?? "",
       createdAt: comment.created_at
+    }))
+  );
+}
+function parseCommits(raw) {
+  const parsed = parseJson(raw);
+  if (!isOk(parsed)) return parsed;
+  return ok(
+    parsed.value.map((commit) => ({
+      sha: commit.sha,
+      shortSha: commit.sha.slice(0, 7),
+      // Only the subject line; the body (after the first newline) is dropped for the list view.
+      message: commit.commit.message.split("\n")[0],
+      // The git-author name from the commit, falling back to the GitHub login when absent.
+      author: commit.commit.author?.name ?? commit.author?.login ?? "",
+      date: commit.commit.author?.date ?? "",
+      url: commit.html_url
     }))
   );
 }
@@ -24794,6 +24819,15 @@ async function getChecks(store, ghClient) {
     });
   }
   return ghClient.listChecks(state.prNumber);
+}
+async function getCommits(store, ghClient) {
+  const state = await store.load();
+  if (state.prNumber <= 0) {
+    return err({
+      message: "PR number is unknown; regenerate graph.json before loading commits."
+    });
+  }
+  return ghClient.listCommits(state.prNumber);
 }
 function buildSubmission(state, event, summaryBody) {
   const lineComments = state.comments.filter((comment) => comment.scope === "line");
@@ -25034,6 +25068,21 @@ function createChecksRouter(deps) {
   );
   return router;
 }
+function createCommitsRouter(deps) {
+  const router = (0, import_express.Router)();
+  router.get(
+    "/",
+    wrap(async (_request, response) => {
+      const result = await getCommits(deps.store, deps.ghClient);
+      if (isOk(result)) {
+        response.json(result.value);
+      } else {
+        response.status(502).json({ error: result.error.message });
+      }
+    })
+  );
+  return router;
+}
 
 // src/server.ts
 var DEFAULT_PORT = 5598;
@@ -25060,6 +25109,7 @@ function createApp(deps) {
   app.use("/api/review", createReviewRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use("/api/existing", createExistingRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use("/api/checks", createChecksRouter({ ghClient: deps.ghClient, store: deps.store }));
+  app.use("/api/commits", createCommitsRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use("/api", (_request, response) => {
     response.status(404).json({ error: "Not found" });
   });
