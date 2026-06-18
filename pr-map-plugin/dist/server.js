@@ -24475,6 +24475,7 @@ var UNRESOLVE_THREAD_MUTATION = `mutation($threadId: ID!) {
 }`;
 function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
   const run = (args, stdin) => retry(() => execute(args, stdin), retryOptions);
+  const runWrite = (args, stdin) => execute(args, stdin);
   return {
     async getPrMetadata(ref) {
       const args = ["pr", "view"];
@@ -24508,7 +24509,7 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       ]);
     },
     createReview(prNumber, submission) {
-      return run(
+      return runWrite(
         [
           "api",
           `repos/{owner}/{repo}/pulls/${prNumber}/reviews`,
@@ -24532,7 +24533,7 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       );
     },
     replyToComment(prNumber, commentId, body) {
-      return run(
+      return runWrite(
         [
           "api",
           `repos/{owner}/{repo}/pulls/${prNumber}/comments/${commentId}/replies`,
@@ -24557,7 +24558,7 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
     // File-level comments are not accepted by the bulk reviews endpoint, so they go through
     // the standalone review-comment endpoint, which needs the head commit_id and subject_type.
     createFileComment(prNumber, commitId, path2, body) {
-      return run(
+      return runWrite(
         [
           "api",
           `repos/{owner}/{repo}/pulls/${prNumber}/comments`,
@@ -24570,7 +24571,7 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       );
     },
     createConversationComment(prNumber, body) {
-      return run(
+      return runWrite(
         [
           "api",
           `repos/{owner}/{repo}/issues/${prNumber}/comments`,
@@ -24620,7 +24621,7 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       return parseReviewThreads(raw.value);
     },
     resolveReviewThread(threadId) {
-      return run([
+      return runWrite([
         "api",
         "graphql",
         "-F",
@@ -24630,7 +24631,7 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       ]);
     },
     unresolveReviewThread(threadId) {
-      return run([
+      return runWrite([
         "api",
         "graphql",
         "-F",
@@ -25009,7 +25010,12 @@ function createFileReviewStore(dataDir, prNumber) {
   };
   const readState = async () => {
     try {
-      return JSON.parse(await readFile(filePath, "utf8"));
+      const parsed = JSON.parse(await readFile(filePath, "utf8"));
+      if (!Array.isArray(parsed.comments)) {
+        console.warn(`pr-map: ${filePath} has no comments array; starting a fresh pending review.`);
+        return { prNumber, comments: [] };
+      }
+      return parsed;
     } catch (error) {
       if (error.code !== "ENOENT") {
         console.warn(`pr-map: could not read ${filePath}; starting a fresh pending review.`);
@@ -25105,6 +25111,12 @@ function createReviewRouter(deps) {
         return;
       }
       const state = await deps.store.load();
+      if (state.prNumber <= 0) {
+        response.status(400).json({
+          error: "PR number is unknown; regenerate graph.json before posting a comment."
+        });
+        return;
+      }
       const result = await deps.ghClient.createConversationComment(state.prNumber, body);
       if (isOk(result)) {
         response.json({ ok: true });
@@ -25122,6 +25134,12 @@ function createReviewRouter(deps) {
         return;
       }
       const state = await deps.store.load();
+      if (state.prNumber <= 0) {
+        response.status(400).json({
+          error: "PR number is unknown; regenerate graph.json before replying."
+        });
+        return;
+      }
       const result = await deps.ghClient.replyToComment(state.prNumber, commentId, body);
       if (isOk(result)) {
         response.json({ ok: true });

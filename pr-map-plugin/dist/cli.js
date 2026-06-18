@@ -74,6 +74,7 @@ var UNRESOLVE_THREAD_MUTATION = `mutation($threadId: ID!) {
 }`;
 function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
   const run = (args, stdin) => retry(() => execute(args, stdin), retryOptions);
+  const runWrite = (args, stdin) => execute(args, stdin);
   return {
     async getPrMetadata(ref) {
       const args = ["pr", "view"];
@@ -107,7 +108,7 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       ]);
     },
     createReview(prNumber, submission) {
-      return run(
+      return runWrite(
         [
           "api",
           `repos/{owner}/{repo}/pulls/${prNumber}/reviews`,
@@ -131,7 +132,7 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       );
     },
     replyToComment(prNumber, commentId, body) {
-      return run(
+      return runWrite(
         [
           "api",
           `repos/{owner}/{repo}/pulls/${prNumber}/comments/${commentId}/replies`,
@@ -156,7 +157,7 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
     // File-level comments are not accepted by the bulk reviews endpoint, so they go through
     // the standalone review-comment endpoint, which needs the head commit_id and subject_type.
     createFileComment(prNumber, commitId, path2, body) {
-      return run(
+      return runWrite(
         [
           "api",
           `repos/{owner}/{repo}/pulls/${prNumber}/comments`,
@@ -169,7 +170,7 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       );
     },
     createConversationComment(prNumber, body) {
-      return run(
+      return runWrite(
         [
           "api",
           `repos/{owner}/{repo}/issues/${prNumber}/comments`,
@@ -219,7 +220,7 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       return parseReviewThreads(raw.value);
     },
     resolveReviewThread(threadId) {
-      return run([
+      return runWrite([
         "api",
         "graphql",
         "-F",
@@ -229,7 +230,7 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       ]);
     },
     unresolveReviewThread(threadId) {
-      return run([
+      return runWrite([
         "api",
         "graphql",
         "-F",
@@ -922,7 +923,7 @@ function localBindingsFor(content, specifier) {
     const braced = /\{([^}]*)\}/.exec(clause);
     if (braced) {
       for (const part of braced[1].split(",")) {
-        const token = part.trim();
+        const token = part.trim().replace(/^type\s+/, "");
         if (!token) continue;
         const alias = /\bas\s+([A-Za-z_$][\w$]*)/.exec(token);
         bindings.push(alias ? alias[1] : token.split(/\s+/)[0]);
