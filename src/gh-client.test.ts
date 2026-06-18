@@ -184,6 +184,93 @@ describe('createGhClient', () => {
     expect(JSON.parse(calls[0].stdin ?? '')).toEqual({ body: 'general thought' });
   });
 
+  it('listReviewComments paginates the pulls comments endpoint and normalizes each comment', async () => {
+    const { execute, calls } = recordingExecutor([
+      ok(
+        JSON.stringify([
+          {
+            id: 1,
+            path: 'a.ts',
+            line: 12,
+            original_line: 10,
+            side: 'RIGHT',
+            body: 'inline note',
+            user: { login: 'octocat' },
+            created_at: '2026-06-01T00:00:00Z',
+            in_reply_to_id: 7,
+          },
+          {
+            id: 2,
+            path: 'b.ts',
+            line: null,
+            original_line: 4,
+            side: 'LEFT',
+            body: 'outdated note',
+            user: null,
+            created_at: '2026-06-02T00:00:00Z',
+          },
+        ]),
+      ),
+    ]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    const result = await client.listReviewComments(42);
+
+    expect(calls[0].args).toEqual([
+      'api',
+      'repos/{owner}/{repo}/pulls/42/comments',
+      '--paginate',
+    ]);
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value[0]).toEqual({
+        id: 1,
+        path: 'a.ts',
+        line: 12,
+        side: 'RIGHT',
+        body: 'inline note',
+        author: 'octocat',
+        createdAt: '2026-06-01T00:00:00Z',
+        inReplyToId: 7,
+      });
+      // Falls back to original_line when line is null, defaults author and reply id.
+      expect(result.value[1]).toMatchObject({ line: 4, author: '', inReplyToId: null });
+    }
+  });
+
+  it('listConversationComments reads the issues comments endpoint', async () => {
+    const { execute, calls } = recordingExecutor([
+      ok(
+        JSON.stringify([
+          {
+            id: 9,
+            body: 'general thought',
+            user: { login: 'reviewer' },
+            created_at: '2026-06-03T00:00:00Z',
+          },
+        ]),
+      ),
+    ]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    const result = await client.listConversationComments(42);
+
+    expect(calls[0].args).toEqual([
+      'api',
+      'repos/{owner}/{repo}/issues/42/comments',
+      '--paginate',
+    ]);
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value[0]).toEqual({
+        id: 9,
+        body: 'general thought',
+        author: 'reviewer',
+        createdAt: '2026-06-03T00:00:00Z',
+      });
+    }
+  });
+
   it('getHeadSha returns the trimmed head sha', async () => {
     const { execute, calls } = recordingExecutor([ok('deadbeef\n')]);
     const client = createGhClient(execute, noDelayRetry);

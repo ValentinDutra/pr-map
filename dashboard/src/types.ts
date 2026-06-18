@@ -78,3 +78,28 @@ export interface ReviewState {
   comments: PendingComment[];
   summaryBody?: string;
 }
+
+// A line-scoped review comment already posted to the PR by any reviewer (read-only).
+export interface ExistingReviewComment {
+  id: number;
+  path: string;
+  line: number | null;
+  side: CommentSide;
+  body: string;
+  author: string;
+  createdAt: string;
+  inReplyToId: number | null;
+}
+
+// A PR-level (Conversation tab) comment already posted to the PR by any reviewer (read-only).
+export interface ExistingConversationComment {
+  id: number;
+  body: string;
+  author: string;
+  createdAt: string;
+}
+
+export interface ExistingDiscussion {
+  reviewComments: ExistingReviewComment[];
+  conversationComments: ExistingConversationComment[];
+}

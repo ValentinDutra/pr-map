@@ -41,6 +41,8 @@ function fakeGhClient(options: FakeOptions): {
     getHeadSha: () => Promise.resolve(ok('headsha')),
     createFileComment: () => Promise.resolve(ok('')),
     createConversationComment: () => Promise.resolve(ok('')),
+    listReviewComments: () => Promise.resolve(ok([])),
+    listConversationComments: () => Promise.resolve(ok([])),
   };
   return { client, contentCalls };
 }

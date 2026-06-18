@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { reviewApi } from './review-api';
-import type { PendingComment } from './types';
+import { formatCommentTimestamp } from './format';
+import type { ExistingReviewComment, PendingComment } from './types';
 
 interface DiffLineMeta {
   oldLine: number | null;
@@ -61,10 +62,12 @@ interface DiffViewProps {
   patch: string;
   path: string;
   comments: PendingComment[];
+  existingComments: ExistingReviewComment[];
   onChange: () => void;
   setStatus: (status: string | null) => void;
 }
 
+// The reviewer's own not-yet-submitted comment: amber, the same accent the pending list uses.
 function CommentThread({ comment }: { comment: PendingComment }) {
   const range =
     comment.startLine !== undefined ? `lines ${comment.startLine}–${comment.line}` : `line ${comment.line}`;
@@ -76,7 +79,30 @@ function CommentThread({ comment }: { comment: PendingComment }) {
   );
 }
 
-export function DiffView({ patch, path, comments, onChange, setStatus }: DiffViewProps) {
+// A comment already posted to the PR by any reviewer: slate/gray, read-only, with author and
+// date so it never reads like one of your own pending amber comments.
+function ExistingThread({ comment }: { comment: ExistingReviewComment }) {
+  return (
+    <div className="border-l-4 border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-200">
+      <div className="mb-0.5 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+        <span className="font-medium text-slate-600 dark:text-slate-300">{comment.author}</span>
+        <span>·</span>
+        <span>{formatCommentTimestamp(comment.createdAt)}</span>
+        {comment.inReplyToId !== null ? <span className="italic">reply</span> : null}
+      </div>
+      <div className="whitespace-pre-wrap break-words font-sans">{comment.body}</div>
+    </div>
+  );
+}
+
+export function DiffView({
+  patch,
+  path,
+  comments,
+  existingComments,
+  onChange,
+  setStatus,
+}: DiffViewProps) {
   const lines = patch.split('\n');
   const lineMeta = computeLineMeta(patch);
   const [target, setTarget] = useState<{ startLine?: number; line: number } | null>(null);
@@ -89,6 +115,10 @@ export function DiffView({ patch, path, comments, onChange, setStatus }: DiffVie
 
   const lineComments = comments.filter((comment) => comment.scope === 'line');
   const fileComments = comments.filter((comment) => comment.scope === 'file');
+  // Anchor existing comments to the new-file (RIGHT) line, the same gutter the inline UI uses.
+  const existingLineComments = existingComments.filter(
+    (comment) => comment.side === 'RIGHT' && comment.line !== null,
+  );
 
   // Press the "+" on a line and drag up or down to grow the selection; release to open the box.
   // Holding shift extends the existing selection instead of starting a new one.
@@ -282,6 +312,12 @@ export function DiffView({ patch, path, comments, onChange, setStatus }: DiffVie
                 </span>
                 <span className="flex-1 whitespace-pre-wrap break-words px-3">{text || ' '}</span>
               </div>
+
+              {existingLineComments
+                .filter((comment) => comment.line === newLine)
+                .map((comment) => (
+                  <ExistingThread key={comment.id} comment={comment} />
+                ))}
 
               {lineComments
                 .filter((comment) => comment.line === newLine)

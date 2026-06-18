@@ -1,4 +1,10 @@
-import type { CommentScope, CommentSide, ReviewEvent, ReviewState } from './types';
+import type {
+  CommentScope,
+  CommentSide,
+  ExistingDiscussion,
+  ReviewEvent,
+  ReviewState,
+} from './types';
 
 async function asJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -19,6 +25,9 @@ export interface AddCommentInput {
 
 export const reviewApi = {
   getPending: () => fetch('/api/review/pending').then((response) => asJson<ReviewState>(response)),
+
+  getExisting: () =>
+    fetch('/api/existing').then((response) => asJson<ExistingDiscussion>(response)),
 
   addComment: (input: AddCommentInput) =>
     fetch('/api/review/comment', {
