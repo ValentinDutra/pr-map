@@ -1,4 +1,4 @@
-import type { CommentSide, ReviewEvent, ReviewState } from './types';
+import type { CommentScope, CommentSide, ReviewEvent, ReviewState } from './types';
 
 async function asJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -8,9 +8,12 @@ async function asJson<T>(response: Response): Promise<T> {
 }
 
 export interface AddCommentInput {
+  scope: CommentScope;
   path: string;
   line?: number;
+  startLine?: number;
   side?: CommentSide;
+  startSide?: CommentSide;
   body: string;
 }
 
@@ -35,6 +38,20 @@ export const reviewApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ commentId, body }),
     }).then((response) => asJson<{ ok: boolean }>(response)),
+
+  addConversationComment: (body: string) =>
+    fetch('/api/review/conversation', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    }).then((response) => asJson<{ ok: boolean }>(response)),
+
+  setSummary: (body: string) =>
+    fetch('/api/review/summary', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ body }),
+    }).then((response) => asJson<ReviewState>(response)),
 
   submit: (event: ReviewEvent, body?: string) =>
     fetch('/api/review/submit', {

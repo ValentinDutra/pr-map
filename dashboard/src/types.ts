@@ -35,6 +35,7 @@ export interface GraphEdge {
   origin: EdgeOrigin;
   confidence: number;
   why?: string;
+  affectedSymbol?: string;
 }
 
 export interface PrMeta {
@@ -53,16 +54,21 @@ export interface PrGraph {
   nodes: GraphNode[];
   edges: GraphEdge[];
   generatedAt: string;
+  hiddenNeighborCount: number;
 }
 
 export type CommentSide = 'LEFT' | 'RIGHT';
+export type CommentScope = 'line' | 'file';
 export type ReviewEvent = 'APPROVE' | 'REQUEST_CHANGES' | 'COMMENT';
 
 export interface PendingComment {
   id: string;
+  scope: CommentScope;
   path: string;
   line?: number;
+  startLine?: number;
   side?: CommentSide;
+  startSide?: CommentSide;
   body: string;
   inReplyTo?: number;
 }
@@ -70,5 +76,5 @@ export interface PendingComment {
 export interface ReviewState {
   prNumber: number;
   comments: PendingComment[];
-  generalBody?: string;
+  summaryBody?: string;
 }

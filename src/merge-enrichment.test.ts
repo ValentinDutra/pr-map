@@ -29,6 +29,7 @@ const baseGraph: PrGraph = {
     },
   ],
   generatedAt: '2026-06-17T00:00:00.000Z',
+  hiddenNeighborCount: 0,
 };
 
 const result: EnrichmentResult = {
@@ -63,6 +64,10 @@ describe('mergeEnrichment', () => {
       (edge) => edge.id === 'src/a.ts->src/c.ts:semantic:outgoing',
     );
     expect(semanticEdge).toMatchObject({ origin: 'llm', kind: 'semantic', confidence: 0.5 });
+
+    // The semantic target was not in the static graph; merge adds it as a neighbor so the edge renders.
+    const semanticTarget = merged.nodes.find((candidate) => candidate.id === 'src/c.ts');
+    expect(semanticTarget).toMatchObject({ inPr: false, language: 'typescript' });
   });
 
   it('does not mutate the input graph', () => {
@@ -71,5 +76,6 @@ describe('mergeEnrichment', () => {
     expect(baseGraph.nodes[0].summary).toBeUndefined();
     expect(baseGraph.edges[0].why).toBeUndefined();
     expect(baseGraph.edges).toHaveLength(1);
+    expect(baseGraph.nodes).toHaveLength(2);
   });
 });

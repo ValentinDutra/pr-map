@@ -175,3 +175,50 @@ V2 EXECUTION NOTES
   to refresh committed `pr-map-plugin/dashboard-dist`. Full v2 verified: tsc/eslint 0, 34 tests,
   dashboard build + build:plugin 0, and bundled e2e (slugify#75 + hand-written enrichment) shows a
   node carrying insights via /api/graph.
+
+V3 EXECUTION NOTES
+- Task 1: changed-symbols.ts extractChangedSymbols({patch,headContent?,language,status?}) -> Set<string>.
+  Language strings come from build-graph detectLanguage: "typescript"/"javascript"/"python"/"json"...
+  Hunk header context (after 2nd @@) names the enclosing decl (git function-context) -> main signal for
+  modified files; added files parse all exports from headContent (patch alone also works since all +lines).
+  Only EXPORTED names matter (internal types like NewDebt are not importable, so not needed for matching).
+- Task 2: incoming filter = word-match changed symbols in importer content (handles {x}/ns.x/default).
+  Outgoing filter = bindings imported from a dep that appear on changed lines; JS/TS only, else fail-open.
+  KEY: fail-open when changedSymbols/changedWords empty -> degenerate fixture patches keep all edges, so
+  existing build-graph tests pass unchanged. PrGraph.hiddenNeighborCount is now REQUIRED -> had to add it
+  to the merge-enrichment.test.ts baseGraph literal. assembleGraph takes an injected extractChangedSymbols
+  (default = real one). Real run wallet#1: 25->13 nodes, hiddenNeighborCount 9, edges labeled w/ affectedSymbol.
+  localBindingsFor uses [^;] not [^;\n] to handle multi-line imports. gh getFileContent is flaky -> a run can
+  yield 0 outgoing edges (PR-file content undefined); incoming uses git grep + local reads so it is reliable.
+- Task 3: gh-client ReviewComment gained startLine/startSide -> createReview maps to start_line/start_side
+  (conditional spreads so a plain line comment still serializes to {path,body,line,side}, keeping the old test).
+  File comments do NOT go in the bulk reviews endpoint -> createFileComment(prNumber,commitId,path,body) hits
+  POST pulls/{n}/comments with subject_type:file + commit_id. getHeadSha trims gh stdout. createConversationComment
+  -> issues/{n}/comments. Adding methods to GhClient broke the fakeGhClient in fetch-pr.test.ts -> add stubs there too.
+- Task 4: PendingComment now has scope:"line"|"file" + startLine/startSide; ReviewState.generalBody -> summaryBody.
+  buildSubmission only emits line comments (+ranges) and body=summaryBody. submitReview posts file comments
+  separately via getHeadSha+createFileComment, then the bulk review for verdict+summary+line comments.
+  Guards: REQUEST_CHANGES needs review content; COMMENT needs content OR >=1 file comment; APPROVE may be empty.
+  New routes: PUT /summary (setSummary), POST /conversation (immediate issue comment). Mirrored types in
+  dashboard/src/types.ts (also added affectedSymbol/hiddenNeighborCount). Dashboard build still green (no component
+  constructed PendingComment or used generalBody).
+- Task 5: Tailwind v4 class dark mode needs `@custom-variant dark (&:where(.dark, .dark *));` in index.css
+  (no tailwind.config). theme.ts zustand store inits from localStorage("pr-map-theme") else prefers-color-scheme,
+  toggles `dark` class on documentElement. App.tsx gained a column layout with a header (pr-map + PR title + toggle).
+  Components still need dark: variants (task 6). Root eslint ignores dashboard/**, so dashboard is checked only by
+  its own `tsc --noEmit` inside `npm --prefix dashboard run build`.
+- Task 8: usePanelTab store (diff|insights|conversation, default diff) in store.ts. detail-panel split into
+  tabs: Diff (diff+composer or neighbor message), Insights (summary+insights+connections), Conversation (placeholder,
+  filled task 11). Node header stays above the tab bar.
+- Task 9: Finish-review tray lives in App.tsx header (absolute panel; header is relative). Flow: setSummary(body)
+  -> PUT /api/review/summary, then submit(event). Cross-panel refresh via useReviewRefresh store (bump on submit;
+  Sidebar useEffect deps include version). review-controls lost the verdict buttons (moved to tray); keeps pending
+  list + reply + delete and now shows scope "(file)" for file comments.
+- Task 10: DiffView is now self-contained for commenting (props: patch,path,comments,onChange,setStatus).
+  Line "+" appears on group-hover; shift-click extends a range (startLine..line, side RIGHT). "Comment on file"
+  button -> scope:file comment. Pending line/file comments render inline as threads. detail-panel now receives
+  `pending` (threaded from Sidebar) and filters comments by node.path; old selectedLine composer removed. Connections
+  list now shows edge.affectedSymbol. store selectedLine/setLine are now dead (harmless) - clean up later if needed.
+- Task 13: full verify green (tsc0, eslint0, 47 tests, dashboard build0, build:plugin0). Bundled e2e vs wallet#1:
+  cli 13 nodes/5 edges/hidden9; server /api/graph serves hidden9 + affectedSymbol edge labels; index.html title pr-map.
+  Server PRMAP_NO_OPEN=1 to skip browser in headless checks.

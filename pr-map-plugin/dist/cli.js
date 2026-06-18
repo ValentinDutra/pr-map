@@ -85,7 +85,14 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
         JSON.stringify({
           event: submission.event,
           body: submission.body ?? "",
-          comments: submission.comments
+          comments: submission.comments.map((comment) => ({
+            path: comment.path,
+            body: comment.body,
+            ...comment.line !== void 0 ? { line: comment.line } : {},
+            ...comment.side ? { side: comment.side } : {},
+            ...comment.startLine !== void 0 ? { start_line: comment.startLine } : {},
+            ...comment.startSide ? { start_side: comment.startSide } : {}
+          }))
         })
       );
     },
@@ -94,6 +101,44 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
         [
           "api",
           `repos/{owner}/{repo}/pulls/${prNumber}/comments/${commentId}/replies`,
+          "--method",
+          "POST",
+          "--input",
+          "-"
+        ],
+        JSON.stringify({ body })
+      );
+    },
+    async getHeadSha(prNumber) {
+      const raw = await run([
+        "api",
+        `repos/{owner}/{repo}/pulls/${prNumber}`,
+        "--jq",
+        ".head.sha"
+      ]);
+      if (!isOk(raw)) return raw;
+      return ok(raw.value.trim());
+    },
+    // File-level comments are not accepted by the bulk reviews endpoint, so they go through
+    // the standalone review-comment endpoint, which needs the head commit_id and subject_type.
+    createFileComment(prNumber, commitId, path2, body) {
+      return run(
+        [
+          "api",
+          `repos/{owner}/{repo}/pulls/${prNumber}/comments`,
+          "--method",
+          "POST",
+          "--input",
+          "-"
+        ],
+        JSON.stringify({ commit_id: commitId, path: path2, subject_type: "file", body })
+      );
+    },
+    createConversationComment(prNumber, body) {
+      return run(
+        [
+          "api",
+          `repos/{owner}/{repo}/issues/${prNumber}/comments`,
           "--method",
           "POST",
           "--input",
@@ -491,7 +536,77 @@ function findRule(filePath) {
   return IMPORT_RULES.find((rule) => rule.extensions.includes(extension));
 }
 
-// src/build-graph.ts
+// src/changed-symbols.ts
+var JS_TS_LANGUAGES = /* @__PURE__ */ new Set(["typescript", "javascript"]);
+function jsTsNamesFrom(code) {
+  const names = [];
+  const declarationPatterns = [
+    /\bexport\s+(?:default\s+)?(?:async\s+)?function\s+([A-Za-z_$][\w$]*)/g,
+    /\bexport\s+(?:abstract\s+)?class\s+([A-Za-z_$][\w$]*)/g,
+    /\bexport\s+(?:const|let|var)\s+([A-Za-z_$][\w$]*)/g,
+    /\bexport\s+(?:type|interface|enum)\s+([A-Za-z_$][\w$]*)/g
+  ];
+  for (const pattern of declarationPatterns) {
+    let match;
+    while ((match = pattern.exec(code)) !== null) names.push(match[1]);
+  }
+  const bracedExports = /\bexport\s*\{([^}]*)\}/g;
+  let bracedMatch;
+  while ((bracedMatch = bracedExports.exec(code)) !== null) {
+    for (const part of bracedMatch[1].split(",")) {
+      const token = part.trim();
+      if (!token) continue;
+      const aliasMatch = /\bas\s+([A-Za-z_$][\w$]*)/.exec(token);
+      const name = aliasMatch ? aliasMatch[1] : token.split(/\s+/)[0];
+      if (/^[A-Za-z_$][\w$]*$/.test(name)) names.push(name);
+    }
+  }
+  return names;
+}
+function pythonNamesFrom(code) {
+  const names = [];
+  const declarationPatterns = [
+    /(?:^|\s)(?:async\s+)?def\s+([A-Za-z_]\w*)/g,
+    /(?:^|\s)class\s+([A-Za-z_]\w*)/g
+  ];
+  for (const pattern of declarationPatterns) {
+    let match;
+    while ((match = pattern.exec(code)) !== null) names.push(match[1]);
+  }
+  return names;
+}
+function relevantCodeFragments(patch) {
+  const fragments = [];
+  for (const rawLine of patch.split("\n")) {
+    if (rawLine.startsWith("@@")) {
+      const context = /^@@.*?@@ ?(.*)$/.exec(rawLine);
+      if (context && context[1]) fragments.push(context[1]);
+      continue;
+    }
+    if (rawLine.startsWith("+++") || rawLine.startsWith("---")) continue;
+    if (rawLine.startsWith("+") || rawLine.startsWith("-")) {
+      fragments.push(rawLine.slice(1));
+    }
+  }
+  return fragments;
+}
+function extractChangedSymbols(input) {
+  const namesFrom = JS_TS_LANGUAGES.has(input.language) ? jsTsNamesFrom : input.language === "python" ? pythonNamesFrom : null;
+  if (!namesFrom) return /* @__PURE__ */ new Set();
+  const result = /* @__PURE__ */ new Set();
+  if (input.status === "added" && input.headContent) {
+    for (const line of input.headContent.split("\n")) {
+      for (const name of namesFrom(line)) result.add(name);
+    }
+    return result;
+  }
+  for (const fragment of relevantCodeFragments(input.patch ?? "")) {
+    for (const name of namesFrom(fragment)) result.add(name);
+  }
+  return result;
+}
+
+// src/languages.ts
 var LANGUAGE_BY_EXTENSION = {
   ts: "typescript",
   tsx: "typescript",
@@ -523,6 +638,9 @@ function detectLanguage(path2) {
   const extension = path2.slice(lastDot + 1).toLowerCase();
   return LANGUAGE_BY_EXTENSION[extension] ?? extension;
 }
+
+// src/build-graph.ts
+var JS_TS_LANGUAGES2 = /* @__PURE__ */ new Set(["typescript", "javascript"]);
 function buildNodes(rawPr) {
   return rawPr.files.map((file) => ({
     id: file.path,
@@ -535,6 +653,53 @@ function buildNodes(rawPr) {
     patch: file.patch,
     summary: ""
   }));
+}
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+function usesIdentifier(content, name) {
+  return new RegExp(`(^|[^\\w$])${escapeRegExp(name)}($|[^\\w$])`).test(content);
+}
+function wordsOnChangedLines(patch) {
+  const words = /* @__PURE__ */ new Set();
+  for (const rawLine of patch.split("\n")) {
+    let text;
+    if (rawLine.startsWith("@@")) {
+      text = /^@@.*?@@ ?(.*)$/.exec(rawLine)?.[1];
+    } else if (rawLine.startsWith("+++") || rawLine.startsWith("---")) {
+      text = void 0;
+    } else if (rawLine.startsWith("+") || rawLine.startsWith("-")) {
+      text = rawLine.slice(1);
+    }
+    if (!text) continue;
+    for (const word of text.match(/[A-Za-z_$][\w$]*/g) ?? []) words.add(word);
+  }
+  return words;
+}
+function localBindingsFor(content, specifier) {
+  const statementPattern = new RegExp(
+    `import\\s+([^;]*?)\\s+from\\s+['"]${escapeRegExp(specifier)}['"]`,
+    "g"
+  );
+  const bindings = [];
+  let statement;
+  while ((statement = statementPattern.exec(content)) !== null) {
+    const clause = statement[1];
+    const namespace = /\*\s+as\s+([A-Za-z_$][\w$]*)/.exec(clause);
+    if (namespace) bindings.push(namespace[1]);
+    const braced = /\{([^}]*)\}/.exec(clause);
+    if (braced) {
+      for (const part of braced[1].split(",")) {
+        const token = part.trim();
+        if (!token) continue;
+        const alias = /\bas\s+([A-Za-z_$][\w$]*)/.exec(token);
+        bindings.push(alias ? alias[1] : token.split(/\s+/)[0]);
+      }
+    }
+    const defaultBinding = /^\s*([A-Za-z_$][\w$]*)\s*(?:,|$)/.exec(clause);
+    if (defaultBinding && defaultBinding[1] !== "type") bindings.push(defaultBinding[1]);
+  }
+  return bindings.filter((name) => /^[A-Za-z_$][\w$]*$/.test(name));
 }
 function ensureNeighbor(nodesById, targetPath) {
   if (nodesById.has(targetPath)) return;
@@ -554,13 +719,22 @@ function addEdge(edgesById, edge) {
 function addOutgoingEdges(nodes, rawPr, repoFiles) {
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
   const edgesById = /* @__PURE__ */ new Map();
+  const droppedNeighbors = /* @__PURE__ */ new Set();
+  const prPaths = new Set(rawPr.files.map((file) => file.path));
   for (const file of rawPr.files) {
     if (file.content === void 0) continue;
     const rule = findRule(file.path);
     if (!rule) continue;
+    const changedWords = wordsOnChangedLines(file.patch ?? "");
+    const filterOutgoing = JS_TS_LANGUAGES2.has(detectLanguage(file.path)) && changedWords.size > 0;
     for (const specifier of rule.extractSpecifiers(file.content)) {
+      const affectedSymbol = filterOutgoing ? localBindingsFor(file.content, specifier).find((name) => changedWords.has(name)) : void 0;
       for (const target of rule.resolve(specifier, file.path, repoFiles)) {
         if (target === file.path) continue;
+        if (filterOutgoing && affectedSymbol === void 0) {
+          if (!prPaths.has(target)) droppedNeighbors.add(target);
+          continue;
+        }
         ensureNeighbor(nodesById, target);
         addEdge(edgesById, {
           source: file.path,
@@ -568,12 +742,13 @@ function addOutgoingEdges(nodes, rawPr, repoFiles) {
           kind: "import",
           direction: "outgoing",
           origin: "static",
-          confidence: 1
+          confidence: 1,
+          ...affectedSymbol ? { affectedSymbol } : {}
         });
       }
     }
   }
-  return { nodes: [...nodesById.values()], edges: [...edgesById.values()] };
+  return { nodes: [...nodesById.values()], edges: [...edgesById.values()], droppedNeighbors };
 }
 function importPatternsFor(prPath) {
   const withoutExtension = prPath.replace(/\.[^./]+$/, "");
@@ -583,12 +758,15 @@ function importPatternsFor(prPath) {
     (pattern) => pattern.length > 0
   );
 }
-function addIncomingEdges(nodes, prFiles, repoFiles, gitGrep, readContent) {
+function addIncomingEdges(nodes, prFiles, repoFiles, gitGrep, readContent, changedSymbolsByPath) {
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
   const edgesById = /* @__PURE__ */ new Map();
+  const droppedNeighbors = /* @__PURE__ */ new Set();
   const prFileSet = new Set(prFiles.map((file) => file.path));
   for (const prFile of prFiles) {
     const targetPath = prFile.path;
+    const changedSymbols = changedSymbolsByPath?.get(targetPath);
+    const filterIncoming = changedSymbols !== void 0 && changedSymbols.size > 0;
     const names = prFile.previousPath ? [prFile.path, prFile.previousPath] : [prFile.path];
     const confirmFiles = new Set(repoFiles);
     for (const name of names) confirmFiles.add(name);
@@ -612,6 +790,14 @@ function addIncomingEdges(nodes, prFiles, repoFiles, gitGrep, readContent) {
         )
       );
       if (!names.some((name) => resolvedTargets.has(name))) continue;
+      let affectedSymbol;
+      if (filterIncoming) {
+        affectedSymbol = [...changedSymbols].find((symbol) => usesIdentifier(content, symbol));
+        if (affectedSymbol === void 0) {
+          droppedNeighbors.add(candidatePath);
+          continue;
+        }
+      }
       ensureNeighbor(nodesById, candidatePath);
       addEdge(edgesById, {
         source: candidatePath,
@@ -619,11 +805,12 @@ function addIncomingEdges(nodes, prFiles, repoFiles, gitGrep, readContent) {
         kind: "import",
         direction: "incoming",
         origin: "static",
-        confidence: 1
+        confidence: 1,
+        ...affectedSymbol ? { affectedSymbol } : {}
       });
     }
   }
-  return { nodes: [...nodesById.values()], edges: [...edgesById.values()] };
+  return { nodes: [...nodesById.values()], edges: [...edgesById.values()], droppedNeighbors };
 }
 function dedupeById(items) {
   const byId = /* @__PURE__ */ new Map();
@@ -632,22 +819,42 @@ function dedupeById(items) {
   }
   return [...byId.values()];
 }
-function assembleGraph(rawPr, repoFiles, gitGrep, readContent, generatedAt) {
+function assembleGraph(rawPr, repoFiles, gitGrep, readContent, generatedAt, extractChangedSymbols2 = extractChangedSymbols) {
   const prNodes = buildNodes(rawPr);
+  const changedSymbolsByPath = /* @__PURE__ */ new Map();
+  for (const file of rawPr.files) {
+    changedSymbolsByPath.set(
+      file.path,
+      extractChangedSymbols2({
+        patch: file.patch ?? "",
+        headContent: file.content,
+        language: detectLanguage(file.path),
+        status: file.status
+      })
+    );
+  }
   const outgoing = addOutgoingEdges(prNodes, rawPr, repoFiles);
   const incoming = addIncomingEdges(
     outgoing.nodes,
     rawPr.files,
     repoFiles,
     gitGrep,
-    readContent
+    readContent,
+    changedSymbolsByPath
   );
-  return {
-    meta: rawPr.meta,
-    nodes: dedupeById([...outgoing.nodes, ...incoming.nodes]),
-    edges: dedupeById([...outgoing.edges, ...incoming.edges]),
-    generatedAt
-  };
+  const nodes = dedupeById([...outgoing.nodes, ...incoming.nodes]);
+  const edges = dedupeById([...outgoing.edges, ...incoming.edges]);
+  const nodeIds = new Set(nodes.map((node) => node.id));
+  const prPaths = new Set(rawPr.files.map((file) => file.path));
+  const dropped = /* @__PURE__ */ new Set([
+    ...outgoing.droppedNeighbors ?? [],
+    ...incoming.droppedNeighbors ?? []
+  ]);
+  let hiddenNeighborCount = 0;
+  for (const path2 of dropped) {
+    if (!nodeIds.has(path2) && !prPaths.has(path2)) hiddenNeighborCount += 1;
+  }
+  return { meta: rawPr.meta, nodes, edges, generatedAt, hiddenNeighborCount };
 }
 async function writeGraph(graph, workingDir) {
   const directory = join2(workingDir, ".pr-map", workingDirKey(graph.meta));
@@ -730,7 +937,8 @@ async function main() {
       prNumber: rawPr.meta.number,
       title: rawPr.meta.title,
       nodeCount: graph.nodes.length,
-      edgeCount: graph.edges.length
+      edgeCount: graph.edges.length,
+      hiddenNeighborCount: graph.hiddenNeighborCount
     })
   );
 }

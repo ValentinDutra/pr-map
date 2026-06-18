@@ -33,6 +33,8 @@ export interface GraphEdge {
   origin: EdgeOrigin;
   confidence: number;
   why?: string;
+  // The changed symbol crossing this edge that made the neighbor affected (static edges only).
+  affectedSymbol?: string;
 }
 
 export interface PrMeta {
@@ -51,15 +53,21 @@ export interface PrGraph {
   nodes: GraphNode[];
   edges: GraphEdge[];
   generatedAt: string;
+  // Number of one-hop importers hidden because they use no symbol the diff changed.
+  hiddenNeighborCount: number;
 }
 
 export type CommentSide = 'LEFT' | 'RIGHT';
+export type CommentScope = 'line' | 'file';
 
 export interface PendingComment {
   id: string;
+  scope: CommentScope;
   path: string;
   line?: number;
+  startLine?: number;
   side?: CommentSide;
+  startSide?: CommentSide;
   body: string;
   inReplyTo?: number;
 }
@@ -67,5 +75,6 @@ export interface PendingComment {
 export interface ReviewState {
   prNumber: number;
   comments: PendingComment[];
-  generalBody?: string;
+  // The review summary body (the PR-level comment) submitted together with the verdict.
+  summaryBody?: string;
 }

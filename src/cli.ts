@@ -48,6 +48,7 @@ async function main(): Promise<void> {
       title: rawPr.meta.title,
       nodeCount: graph.nodes.length,
       edgeCount: graph.edges.length,
+      hiddenNeighborCount: graph.hiddenNeighborCount,
     }),
   );
 }

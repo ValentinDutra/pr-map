@@ -14,6 +14,39 @@ function err(error) {
   return { ok: false, error };
 }
 
+// src/languages.ts
+var LANGUAGE_BY_EXTENSION = {
+  ts: "typescript",
+  tsx: "typescript",
+  mts: "typescript",
+  cts: "typescript",
+  js: "javascript",
+  jsx: "javascript",
+  mjs: "javascript",
+  cjs: "javascript",
+  py: "python",
+  json: "json",
+  md: "markdown",
+  css: "css",
+  scss: "css",
+  html: "html",
+  go: "go",
+  rs: "rust",
+  rb: "ruby",
+  java: "java",
+  yml: "yaml",
+  yaml: "yaml",
+  sh: "shell",
+  sql: "sql"
+};
+function detectLanguage(path) {
+  const lastDot = path.lastIndexOf(".");
+  const lastSlash = path.lastIndexOf("/");
+  if (lastDot < 0 || lastDot < lastSlash) return "unknown";
+  const extension = path.slice(lastDot + 1).toLowerCase();
+  return LANGUAGE_BY_EXTENSION[extension] ?? extension;
+}
+
 // src/merge-enrichment.ts
 function mergeEnrichment(graph, results) {
   const nodesById = new Map(graph.nodes.map((node) => [node.id, { ...node }]));
@@ -32,6 +65,14 @@ function mergeEnrichment(graph, results) {
       if (semantic.target === result.path) continue;
       const id = `${result.path}->${semantic.target}:semantic:outgoing`;
       if (edgesById.has(id)) continue;
+      if (!nodesById.has(semantic.target)) {
+        nodesById.set(semantic.target, {
+          id: semantic.target,
+          path: semantic.target,
+          language: detectLanguage(semantic.target),
+          inPr: false
+        });
+      }
       const edge = {
         id,
         source: result.path,
