@@ -11,12 +11,17 @@ function originBadge(edge: GraphEdge): string {
     : 'border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300';
 }
 
+// Plain-language origin: an AI-inferred link vs. a real code import the scanner found.
+function originLabel(edge: GraphEdge): string {
+  return edge.origin === 'llm' ? 'AI' : 'import';
+}
+
 function InsightList({ label, items, color }: { label: string; items: string[]; color: string }) {
   if (items.length === 0) return null;
   return (
-    <div className="mt-1">
-      <div className={`text-[11px] font-medium ${color}`}>{label}</div>
-      <ul className="ml-3 list-disc text-[11px] text-slate-600 dark:text-slate-300">
+    <div className="mt-2">
+      <div className={`text-xs font-semibold ${color}`}>{label}</div>
+      <ul className="ml-4 list-disc text-sm text-slate-600 dark:text-slate-300">
         {items.map((item, index) => (
           <li key={index}>{item}</li>
         ))}
@@ -60,7 +65,7 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
   const node = graph.nodes.find((candidate) => candidate.id === selectedNodeId);
   if (!node) {
     return (
-      <p className="text-xs text-slate-400 dark:text-slate-500">
+      <p className="text-sm text-slate-400 dark:text-slate-500">
         Select a file node to see its connections, diff, and to comment.
       </p>
     );
@@ -74,25 +79,35 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
   return (
     <section className="flex flex-col gap-3">
       <div>
-        <div className="font-mono text-sm font-semibold text-slate-800 dark:text-slate-100">{node.path}</div>
-        <div className="text-[11px] text-slate-500 dark:text-slate-400">
-          {node.language}
-          {node.inPr ? ` · ${node.status ?? 'changed'}` : ' · neighbor (not in this PR)'}
-          {node.inPr && node.additions !== undefined
-            ? ` · +${node.additions} / -${node.deletions ?? 0}`
-            : ''}
+        <div className="break-all font-mono text-base font-semibold text-slate-800 dark:text-slate-100">
+          {node.path}
+        </div>
+        <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+          <span>{node.language}</span>
+          <span>·</span>
+          <span>{node.inPr ? node.status ?? 'changed' : 'neighbor (not in this PR)'}</span>
+          {node.inPr && node.additions !== undefined ? (
+            <>
+              <span className="rounded bg-green-100 px-1.5 py-0.5 font-medium text-green-700 dark:bg-green-950/50 dark:text-green-300">
+                +{node.additions}
+              </span>
+              <span className="rounded bg-red-100 px-1.5 py-0.5 font-medium text-red-700 dark:bg-red-950/50 dark:text-red-300">
+                -{node.deletions ?? 0}
+              </span>
+            </>
+          ) : null}
         </div>
       </div>
 
-      <div className="flex gap-1 border-b border-slate-200 text-xs dark:border-slate-700">
+      <div className="flex gap-2 border-b border-slate-200 text-sm dark:border-slate-700">
         {TABS.map((tab) => (
           <button
             key={tab.id}
             type="button"
             onClick={() => setTab(tab.id)}
-            className={`-mb-px border-b-2 px-2 py-1 ${
+            className={`-mb-px border-b-2 px-3 py-1.5 ${
               activeTab === tab.id
-                ? 'border-slate-800 font-medium text-slate-800 dark:border-slate-100 dark:text-slate-100'
+                ? 'border-slate-800 font-semibold text-slate-800 dark:border-slate-100 dark:text-slate-100'
                 : 'border-transparent text-slate-500 dark:text-slate-400'
             }`}
           >
@@ -104,35 +119,35 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
       {activeTab === 'insights' ? (
         <>
           {node.summary ? (
-            <p className="text-xs text-slate-700 dark:text-slate-300">{node.summary}</p>
+            <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{node.summary}</p>
           ) : null}
 
           {node.insights ? (
             <div>
-              <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
                 Review insights
               </div>
               {node.insights.impact ? (
-                <p className="text-[11px] text-slate-600 dark:text-slate-300">
-                  <span className="font-medium">Impact:</span> {node.insights.impact}
+                <p className="text-sm text-slate-600 dark:text-slate-300">
+                  <span className="font-semibold">Impact:</span> {node.insights.impact}
                 </p>
               ) : null}
-              <InsightList label="Risks" items={node.insights.risks} color="text-red-700" />
+              <InsightList label="Risks" items={node.insights.risks} color="text-red-700 dark:text-red-400" />
               <InsightList
                 label="Suspected bugs"
                 items={node.insights.suspectedBugs}
-                color="text-amber-700"
+                color="text-amber-700 dark:text-amber-400"
               />
               <InsightList
                 label="Tests to check"
                 items={node.insights.testsToCheck}
-                color="text-slate-700"
+                color="text-slate-700 dark:text-slate-300"
               />
             </div>
           ) : null}
 
           <div>
-            <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+            <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
               Connections ({connectedEdges.length})
             </div>
             <ul className="flex flex-col gap-2">
@@ -140,21 +155,21 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
                 const isSource = edge.source === node.id;
                 const other = isSource ? edge.target : edge.source;
                 return (
-                  <li key={edge.id} className="rounded border border-slate-200 p-2 text-xs dark:border-slate-700">
+                  <li key={edge.id} className="rounded border border-slate-200 p-3 text-sm dark:border-slate-700">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-slate-700 dark:text-slate-200">
+                      <span className="break-all font-mono text-slate-700 dark:text-slate-200">
                         {isSource ? '→' : '←'} {other}
                       </span>
-                      <span className={`rounded border px-1 text-[10px] ${originBadge(edge)}`}>
-                        {edge.origin} · {Math.round(edge.confidence * 100)}%
+                      <span className={`shrink-0 rounded border px-1.5 py-0.5 text-xs ${originBadge(edge)}`}>
+                        {originLabel(edge)} · {Math.round(edge.confidence * 100)}%
                       </span>
                     </div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
                       {edge.kind} · {edge.direction}
                       {edge.affectedSymbol ? ` · ${edge.affectedSymbol}` : ''}
                     </div>
                     {edge.why ? (
-                      <div className="mt-1 text-[11px] text-slate-600 dark:text-slate-300">{edge.why}</div>
+                      <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">{edge.why}</div>
                     ) : null}
                   </li>
                 );
@@ -174,7 +189,7 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
             setStatus={setStatus}
           />
         ) : (
-          <p className="text-xs text-slate-400 dark:text-slate-500">
+          <p className="text-sm text-slate-400 dark:text-slate-500">
             No diff — this file is a neighbor, not changed in this PR.
           </p>
         )
@@ -182,13 +197,13 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
 
       {activeTab === 'conversation' ? (
         <div className="flex flex-col gap-2">
-          <p className="text-[11px] text-slate-500 dark:text-slate-400">
+          <p className="text-xs text-slate-500 dark:text-slate-400">
             A standalone PR comment, posted to the Conversation tab on GitHub immediately.
           </p>
           {postedComments.map((text, index) => (
             <div
               key={index}
-              className="rounded border border-slate-200 p-2 text-xs text-slate-700 dark:border-slate-700 dark:text-slate-200"
+              className="rounded border border-slate-200 p-3 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-200"
             >
               {text}
             </div>
@@ -197,13 +212,13 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
             value={conversationBody}
             onChange={(event) => setConversationBody(event.target.value)}
             placeholder="Comment on the whole PR…"
-            className="h-20 rounded border border-slate-300 p-2 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            className="h-24 rounded border border-slate-300 p-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
           />
           <button
             type="button"
             onClick={postConversationComment}
             disabled={!conversationBody.trim()}
-            className="self-start rounded bg-slate-800 px-3 py-1 text-xs text-white disabled:opacity-40 dark:bg-slate-700"
+            className="self-start rounded bg-slate-800 px-3 py-1.5 text-sm text-white disabled:opacity-40 dark:bg-slate-700"
           >
             Post comment
           </button>

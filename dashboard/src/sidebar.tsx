@@ -5,7 +5,7 @@ import { useReviewRefresh } from './store';
 import { DetailPanel } from './detail-panel';
 import { ReviewControls } from './review-controls';
 
-export function Sidebar({ graph }: { graph: PrGraph }) {
+export function Sidebar({ graph, width }: { graph: PrGraph; width: number }) {
   const [pending, setPending] = useState<ReviewState | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const version = useReviewRefresh((state) => state.version);
@@ -23,7 +23,10 @@ export function Sidebar({ graph }: { graph: PrGraph }) {
   }, [refresh, version]);
 
   return (
-    <aside className="flex h-full w-96 shrink-0 flex-col gap-4 overflow-auto border-l border-slate-200 bg-white p-4 dark:border-slate-800 dark:bg-slate-900">
+    <aside
+      style={{ width }}
+      className="flex h-full shrink-0 flex-col gap-4 overflow-auto bg-white p-5 text-sm text-slate-800 dark:bg-slate-900 dark:text-slate-100"
+    >
       <DetailPanel graph={graph} pending={pending} onChange={refresh} setStatus={setStatus} />
       <ReviewControls
         pending={pending}

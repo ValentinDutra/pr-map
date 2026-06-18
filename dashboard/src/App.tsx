@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { GraphView } from './graph-view';
 import { Sidebar } from './sidebar';
 import { useTheme } from './theme';
+import { useResizablePanel } from './use-resizable-panel';
 import { useReviewRefresh } from './store';
 import { reviewApi } from './review-api';
 import graphFixture from './__fixtures__/graph.json';
@@ -99,6 +100,7 @@ function FinishReviewTray({ open, onClose }: { open: boolean; onClose: () => voi
 export function App() {
   const [graph, setGraph] = useState<PrGraph | null>(null);
   const [trayOpen, setTrayOpen] = useState(false);
+  const { width, startResize } = useResizablePanel();
 
   useEffect(() => {
     // Served by the pr-map server this returns the real PR graph; running the static
@@ -138,10 +140,15 @@ export function App() {
       </header>
       {graph ? (
         <div className="flex min-h-0 flex-1">
-          <div className="relative flex-1">
+          <div className="relative min-w-0 flex-1">
             <GraphView graph={graph} />
           </div>
-          <Sidebar graph={graph} />
+          <div
+            onPointerDown={startResize}
+            title="Drag to resize the detail panel"
+            className="w-1.5 shrink-0 cursor-col-resize bg-slate-200 transition-colors hover:bg-slate-400 dark:bg-slate-800 dark:hover:bg-slate-600"
+          />
+          <Sidebar graph={graph} width={width} />
         </div>
       ) : (
         <div className="p-6 text-sm text-slate-500 dark:text-slate-400">Loading PR graph…</div>
