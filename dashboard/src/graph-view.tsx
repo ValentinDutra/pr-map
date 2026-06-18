@@ -9,10 +9,17 @@ import {
   type Edge,
   type NodeTypes,
 } from '@xyflow/react';
-import type { PrGraph } from './types';
+import type { GraphEdge, GraphNode, PrGraph } from './types';
 import { layoutGraph } from './layout';
 import { FileNode, type FileFlowNode } from './file-node';
 import { useSelection } from './store';
+import {
+  filterGraph,
+  folderOptions,
+  initialGraphFilterState,
+  nodeHasRisk,
+  type GraphFilterState,
+} from './graph-filters';
 
 const nodeTypes: NodeTypes = { file: FileNode };
 
@@ -24,12 +31,13 @@ function edgeBaseStyle(origin: string): CSSProperties {
 }
 
 function buildFlow(
-  graph: PrGraph,
+  nodes: GraphNode[],
+  edges: GraphEdge[],
   query: string,
 ): { nodes: FileFlowNode[]; edges: Edge[] } {
   const normalizedQuery = query.trim().toLowerCase();
 
-  const nodes: FileFlowNode[] = graph.nodes.map((node) => ({
+  const flowNodes: FileFlowNode[] = nodes.map((node) => ({
     id: node.id,
     type: 'file',
     position: { x: 0, y: 0 },
@@ -41,14 +49,11 @@ function buildFlow(
       highlighted:
         normalizedQuery.length > 0 &&
         node.path.toLowerCase().includes(normalizedQuery),
-      hasRisk: Boolean(
-        node.insights &&
-          node.insights.risks.length + node.insights.suspectedBugs.length > 0,
-      ),
+      hasRisk: nodeHasRisk(node),
     },
   }));
 
-  const edges: Edge[] = graph.edges.map((edge) => ({
+  const flowEdges: Edge[] = edges.map((edge) => ({
     id: edge.id,
     source: edge.source,
     target: edge.target,
@@ -66,24 +71,34 @@ function buildFlow(
     style: edgeBaseStyle(edge.origin),
   }));
 
-  return { nodes: layoutGraph(nodes, edges), edges };
+  return { nodes: layoutGraph(flowNodes, flowEdges), edges: flowEdges };
 }
 
 export function GraphView({ graph }: { graph: PrGraph }) {
   const [query, setQuery] = useState('');
+  const [filters, setFilters] = useState<GraphFilterState>(initialGraphFilterState);
   const select = useSelection((state) => state.select);
   const selectedNodeId = useSelection((state) => state.selectedNodeId);
-  const layout = useMemo(() => buildFlow(graph, query), [graph, query]);
+
+  const folders = useMemo(() => folderOptions(graph.nodes), [graph.nodes]);
+  // The graph narrowed by the active filters (changed-files-only, risky-only, folder). All
+  // downstream work — layout, search highlight, click-to-focus — runs on this filtered set.
+  const filtered = useMemo(() => filterGraph(graph, filters), [graph, filters]);
+  const layout = useMemo(
+    () => buildFlow(filtered.nodes, filtered.edges, query),
+    [filtered, query],
+  );
   const [nodes, setNodes, onNodesChange] = useNodesState<FileFlowNode>(layout.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layout.edges);
 
   // The selected file, the files it links to, and the edges between them — used to animate
-  // the flow between the focused file and its neighbours and fade everything else.
+  // the flow between the focused file and its neighbours and fade everything else. Computed
+  // over the filtered edges so focus never reaches files the filters have removed.
   const focus = useMemo(() => {
     if (!selectedNodeId) return null;
     const neighbors = new Set<string>([selectedNodeId]);
     const connectedEdgeIds = new Set<string>();
-    for (const edge of graph.edges) {
+    for (const edge of filtered.edges) {
       if (edge.source === selectedNodeId || edge.target === selectedNodeId) {
         neighbors.add(edge.source);
         neighbors.add(edge.target);
@@ -91,7 +106,7 @@ export function GraphView({ graph }: { graph: PrGraph }) {
       }
     }
     return { neighbors, connectedEdgeIds };
-  }, [graph.edges, selectedNodeId]);
+  }, [filtered.edges, selectedNodeId]);
 
   // Re-apply the dagre layout whenever the graph or search query changes; between
   // those changes the user can freely drag nodes (onNodesChange keeps them in state).
@@ -141,6 +156,48 @@ export function GraphView({ graph }: { graph: PrGraph }) {
           placeholder="Search files…"
           className="w-64 rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
         />
+        <label className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-200">
+          <input
+            type="checkbox"
+            checked={filters.changedFilesOnly}
+            onChange={(event) =>
+              setFilters((current) => ({
+                ...current,
+                changedFilesOnly: event.target.checked,
+              }))
+            }
+            className="h-3 w-3"
+          />
+          Changed files only
+        </label>
+        <label className="flex items-center gap-1.5 text-xs text-slate-700 dark:text-slate-200">
+          <input
+            type="checkbox"
+            checked={filters.riskyOnly}
+            onChange={(event) =>
+              setFilters((current) => ({ ...current, riskyOnly: event.target.checked }))
+            }
+            className="h-3 w-3"
+          />
+          Risky only
+        </label>
+        <select
+          value={filters.folder}
+          onChange={(event) =>
+            setFilters((current) => ({ ...current, folder: event.target.value }))
+          }
+          className="w-64 rounded border border-slate-300 px-2 py-1 text-xs dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+        >
+          <option value="">All folders</option>
+          {folders.map((folder) => (
+            <option key={folder} value={folder}>
+              {folder === '' ? '(root)' : folder}
+            </option>
+          ))}
+        </select>
+        <div className="text-[10px] text-slate-500 dark:text-slate-400">
+          showing {filtered.nodes.length} of {graph.nodes.length} files
+        </div>
         <div className="text-[10px] text-slate-500 dark:text-slate-400">
           solid grey = real import · dashed purple = AI-inferred
         </div>
