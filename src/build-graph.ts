@@ -84,7 +84,10 @@ function localBindingsFor(content: string, specifier: string): string[] {
     const braced = /\{([^}]*)\}/.exec(clause);
     if (braced) {
       for (const part of braced[1].split(',')) {
-        const token = part.trim();
+        // Strip a per-specifier `type` modifier (`import { type Foo, bar }`) so the binding is
+        // `Foo`, not the keyword `type` — otherwise any changed line containing `type` would
+        // match it and keep/mislabel the edge.
+        const token = part.trim().replace(/^type\s+/, '');
         if (!token) continue;
         const alias = /\bas\s+([A-Za-z_$][\w$]*)/.exec(token);
         bindings.push(alias ? alias[1] : token.split(/\s+/)[0]);
