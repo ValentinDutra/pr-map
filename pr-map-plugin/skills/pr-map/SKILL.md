@@ -80,8 +80,9 @@ Each subagent returns ONLY a JSON object (or `{ "files": [ ... ] }` for a batch)
 
 ## Notes
 
-- Static edges cover JS/TS and Python imports. For other languages the graph may show isolated
-  nodes; lean on `pr-file-analyst` `semanticEdges` (flagged `origin: "llm"`) to connect them.
+- Static edges cover JavaScript/TypeScript, Python, Go, Java/Kotlin, Ruby, and Rust imports. For
+  other languages the graph may show isolated nodes; lean on `pr-file-analyst` `semanticEdges`
+  (flagged `origin: "llm"`) to connect them.
 - `graph.json`, `raw.json`, `enrichment/`, and `pending-review.json` live under
   `<repo>/.pr-map/<owner>-<repo>-<number>/` — gitignore `.pr-map/` in the target repo.
 - The dashboard server is stopped automatically by the plugin's `SessionEnd` cleanup hook.
