@@ -24547,6 +24547,24 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
         ],
         JSON.stringify({ body })
       );
+    },
+    async listReviewComments(prNumber) {
+      const raw = await run([
+        "api",
+        `repos/{owner}/{repo}/pulls/${prNumber}/comments`,
+        "--paginate"
+      ]);
+      if (!isOk(raw)) return raw;
+      return parseReviewComments(raw.value);
+    },
+    async listConversationComments(prNumber) {
+      const raw = await run([
+        "api",
+        `repos/{owner}/{repo}/issues/${prNumber}/comments`,
+        "--paginate"
+      ]);
+      if (!isOk(raw)) return raw;
+      return parseConversationComments(raw.value);
     }
   };
 }
@@ -24565,6 +24583,36 @@ function parsePrMetadata(raw) {
     baseRef: parsed.value.baseRefName,
     headRef: parsed.value.headRefName
   });
+}
+function parseReviewComments(raw) {
+  const parsed = parseJson(raw);
+  if (!isOk(parsed)) return parsed;
+  return ok(
+    parsed.value.map((comment) => ({
+      id: comment.id,
+      path: comment.path,
+      // GitHub returns line on the current diff, falling back to original_line when the
+      // commented line is outdated against the latest push.
+      line: comment.line ?? comment.original_line,
+      side: comment.side === "LEFT" ? "LEFT" : "RIGHT",
+      body: comment.body,
+      author: comment.user?.login ?? "",
+      createdAt: comment.created_at,
+      inReplyToId: comment.in_reply_to_id ?? null
+    }))
+  );
+}
+function parseConversationComments(raw) {
+  const parsed = parseJson(raw);
+  if (!isOk(parsed)) return parsed;
+  return ok(
+    parsed.value.map((comment) => ({
+      id: comment.id,
+      body: comment.body,
+      author: comment.user?.login ?? "",
+      createdAt: comment.created_at
+    }))
+  );
 }
 function parseChangedFiles(raw) {
   const parsed = parseJson(raw);
@@ -24663,6 +24711,22 @@ function setSummary(store, summaryBody) {
 }
 function getPending(store) {
   return store.load();
+}
+async function getExisting(store, ghClient) {
+  const state = await store.load();
+  if (state.prNumber <= 0) {
+    return err({
+      message: "PR number is unknown; regenerate graph.json before loading the discussion."
+    });
+  }
+  const reviewComments = await ghClient.listReviewComments(state.prNumber);
+  if (!isOk(reviewComments)) return reviewComments;
+  const conversationComments = await ghClient.listConversationComments(state.prNumber);
+  if (!isOk(conversationComments)) return conversationComments;
+  return ok({
+    reviewComments: reviewComments.value,
+    conversationComments: conversationComments.value
+  });
 }
 function buildSubmission(state, event, summaryBody) {
   const lineComments = state.comments.filter((comment) => comment.scope === "line");
@@ -24873,6 +24937,21 @@ function createReviewRouter(deps) {
   );
   return router;
 }
+function createExistingRouter(deps) {
+  const router = (0, import_express.Router)();
+  router.get(
+    "/",
+    wrap(async (_request, response) => {
+      const result = await getExisting(deps.store, deps.ghClient);
+      if (isOk(result)) {
+        response.json(result.value);
+      } else {
+        response.status(502).json({ error: result.error.message });
+      }
+    })
+  );
+  return router;
+}
 
 // src/server.ts
 var DEFAULT_PORT = 5598;
@@ -24897,6 +24976,7 @@ function createApp(deps) {
     }
   });
   app.use("/api/review", createReviewRouter({ ghClient: deps.ghClient, store: deps.store }));
+  app.use("/api/existing", createExistingRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use("/api", (_request, response) => {
     response.status(404).json({ error: "Not found" });
   });
@@ -24916,9 +24996,21 @@ async function readPrNumber(dataDir) {
 }
 function listen(app, port) {
   return new Promise((resolvePromise, rejectPromise) => {
-    const server = app.listen(port, () => resolvePromise());
+    const server = app.listen(port, () => resolvePromise(server));
     server.on("error", (error) => rejectPromise(error));
   });
+}
+function registerGracefulShutdown(server) {
+  let shuttingDown = false;
+  const shutdown = (signal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`pr-map dashboard shutting down (${signal})`);
+    server.close(() => process.exit(0));
+  };
+  for (const signal of ["SIGTERM", "SIGINT"]) {
+    process.on(signal, () => shutdown(signal));
+  }
 }
 async function startServer(dataDir, preferredPort = DEFAULT_PORT) {
   const prNumber = await readPrNumber(dataDir);
@@ -24930,7 +25022,8 @@ async function startServer(dataDir, preferredPort = DEFAULT_PORT) {
   let port = preferredPort;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     try {
-      await listen(app, port);
+      const server = await listen(app, port);
+      registerGracefulShutdown(server);
       try {
         writeFileSync(PID_FILE, String(process.pid));
       } catch {
