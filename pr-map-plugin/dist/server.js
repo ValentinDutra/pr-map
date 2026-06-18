@@ -24439,6 +24439,40 @@ function delay(milliseconds) {
 // src/gh-client.ts
 var DEFAULT_RETRY_OPTIONS = { attempts: 3, delayMs: 300 };
 var PR_METADATA_FIELDS = "number,title,body,author,baseRefName,headRefName,url";
+var REVIEW_THREADS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          comments(first: 100) {
+            nodes {
+              databaseId
+              body
+              createdAt
+              path
+              line
+              originalLine
+              author { login }
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
+var RESOLVE_THREAD_MUTATION = `mutation($threadId: ID!) {
+  resolveReviewThread(input: { threadId: $threadId }) {
+    thread { id isResolved }
+  }
+}`;
+var UNRESOLVE_THREAD_MUTATION = `mutation($threadId: ID!) {
+  unresolveReviewThread(input: { threadId: $threadId }) {
+    thread { id isResolved }
+  }
+}`;
 function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
   const run = (args, stdin) => retry(() => execute(args, stdin), retryOptions);
   return {
@@ -24566,6 +24600,45 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       if (!isOk(raw)) return raw;
       return parseConversationComments(raw.value);
     },
+    // Review threads (the resolved/unresolved grouping) only exist in GraphQL. The {owner}/{repo}
+    // placeholders are populated by gh from the current repository, the same context the REST
+    // calls above rely on, so this method needs nothing beyond the PR number.
+    async listReviewThreads(prNumber) {
+      const raw = await run([
+        "api",
+        "graphql",
+        "-F",
+        "owner={owner}",
+        "-F",
+        "name={repo}",
+        "-F",
+        `number=${prNumber}`,
+        "-f",
+        `query=${REVIEW_THREADS_QUERY}`
+      ]);
+      if (!isOk(raw)) return raw;
+      return parseReviewThreads(raw.value);
+    },
+    resolveReviewThread(threadId) {
+      return run([
+        "api",
+        "graphql",
+        "-F",
+        `threadId=${threadId}`,
+        "-f",
+        `query=${RESOLVE_THREAD_MUTATION}`
+      ]);
+    },
+    unresolveReviewThread(threadId) {
+      return run([
+        "api",
+        "graphql",
+        "-F",
+        `threadId=${threadId}`,
+        "-f",
+        `query=${UNRESOLVE_THREAD_MUTATION}`
+      ]);
+    },
     // Checks live in two GitHub surfaces: the check-runs API (GitHub Actions, App checks)
     // and the legacy combined-status API (commit statuses). Both hang off the head commit,
     // so resolve the SHA first, then merge the two responses into one normalized summary.
@@ -24643,6 +24716,34 @@ function parseConversationComments(raw) {
       author: comment.user?.login ?? "",
       createdAt: comment.created_at
     }))
+  );
+}
+function parseReviewThreads(raw) {
+  const parsed = parseJson(raw);
+  if (!isOk(parsed)) return parsed;
+  const nodes = parsed.value.data?.repository?.pullRequest?.reviewThreads?.nodes;
+  if (!nodes) {
+    return err({ message: "GraphQL response did not contain review threads." });
+  }
+  return ok(
+    nodes.map((thread) => {
+      const firstComment = thread.comments.nodes[0];
+      return {
+        id: thread.id,
+        isResolved: thread.isResolved,
+        // Every comment in a thread shares the same path; take it from the first one.
+        path: firstComment?.path ?? "",
+        // The thread anchors to the first comment's current-diff line, falling back to the
+        // original line when the line is outdated against the latest push.
+        line: firstComment ? firstComment.line ?? firstComment.originalLine : null,
+        comments: thread.comments.nodes.map((comment) => ({
+          id: comment.databaseId,
+          author: comment.author?.login ?? "",
+          body: comment.body,
+          createdAt: comment.createdAt
+        }))
+      };
+    })
   );
 }
 function parseCommits(raw) {
@@ -24810,6 +24911,15 @@ async function getExisting(store, ghClient) {
     reviewComments: reviewComments.value,
     conversationComments: conversationComments.value
   });
+}
+async function getThreads(store, ghClient) {
+  const state = await store.load();
+  if (state.prNumber <= 0) {
+    return err({
+      message: "PR number is unknown; regenerate graph.json before loading review threads."
+    });
+  }
+  return ghClient.listReviewThreads(state.prNumber);
 }
 async function getChecks(store, ghClient) {
   const state = await store.load();
@@ -25083,6 +25193,43 @@ function createCommitsRouter(deps) {
   );
   return router;
 }
+function createThreadsRouter(deps) {
+  const router = (0, import_express.Router)();
+  router.get(
+    "/",
+    wrap(async (_request, response) => {
+      const result = await getThreads(deps.store, deps.ghClient);
+      if (isOk(result)) {
+        response.json(result.value);
+      } else {
+        response.status(502).json({ error: result.error.message });
+      }
+    })
+  );
+  router.post(
+    "/:id/resolve",
+    wrap(async (request, response) => {
+      const result = await deps.ghClient.resolveReviewThread(request.params.id);
+      if (isOk(result)) {
+        response.json({ ok: true });
+      } else {
+        response.status(502).json({ error: result.error.message });
+      }
+    })
+  );
+  router.post(
+    "/:id/unresolve",
+    wrap(async (request, response) => {
+      const result = await deps.ghClient.unresolveReviewThread(request.params.id);
+      if (isOk(result)) {
+        response.json({ ok: true });
+      } else {
+        response.status(502).json({ error: result.error.message });
+      }
+    })
+  );
+  return router;
+}
 
 // src/server.ts
 var DEFAULT_PORT = 5598;
@@ -25110,6 +25257,7 @@ function createApp(deps) {
   app.use("/api/existing", createExistingRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use("/api/checks", createChecksRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use("/api/commits", createCommitsRouter({ ghClient: deps.ghClient, store: deps.store }));
+  app.use("/api/threads", createThreadsRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use("/api", (_request, response) => {
     response.status(404).json({ error: "Not found" });
   });
