@@ -3,11 +3,16 @@ import type { GraphEdge, PrGraph } from './types';
 import { useSelection } from './store';
 import { DiffView } from './diff-view';
 import { reviewApi } from './review-api';
+import { AiSuggestionBadge } from './ai-suggestion-badge';
 
 function originBadge(edge: GraphEdge): string {
   return edge.origin === 'llm'
     ? 'border-purple-300 bg-purple-50 text-purple-700'
     : 'border-slate-300 bg-slate-50 text-slate-600';
+}
+
+function originLabel(edge: GraphEdge): string {
+  return edge.origin === 'llm' ? 'AI' : 'static';
 }
 
 function InsightList({ label, items, color }: { label: string; items: string[]; color: string }) {
@@ -80,13 +85,24 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
         </div>
       </div>
 
-      {node.summary ? <p className="text-xs text-slate-700">{node.summary}</p> : null}
+      {node.summary ? (
+        <div className="rounded-r border-l-2 border-purple-300 bg-purple-50/50 py-1 pl-2 pr-1">
+          <AiSuggestionBadge className="mb-1" />
+          <p className="text-xs text-slate-700">{node.summary}</p>
+        </div>
+      ) : null}
 
       {node.insights ? (
-        <div>
-          <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-slate-400">
-            Review insights
+        <div className="rounded-r border-l-2 border-purple-300 bg-purple-50/50 py-1 pl-2 pr-1">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              AI review suggestions
+            </span>
+            <AiSuggestionBadge />
           </div>
+          <p className="mb-2 text-[11px] text-slate-500">
+            Suggestions to guide your review — not verified. You decide what's real.
+          </p>
           {node.insights.impact ? (
             <p className="text-[11px] text-slate-600">
               <span className="font-medium">Impact:</span> {node.insights.impact}
@@ -121,14 +137,19 @@ export function DetailPanel({ graph, onChange, setStatus }: DetailPanelProps) {
                     {isSource ? '→' : '←'} {other}
                   </span>
                   <span className={`rounded border px-1 text-[10px] ${originBadge(edge)}`}>
-                    {edge.origin} · {Math.round(edge.confidence * 100)}%
+                    {originLabel(edge)} · {Math.round(edge.confidence * 100)}%
                   </span>
                 </div>
                 <div className="text-[11px] text-slate-500">
                   {edge.kind} · {edge.direction}
                 </div>
                 {edge.why ? (
-                  <div className="mt-1 text-[11px] text-slate-600">{edge.why}</div>
+                  <div className="mt-1 text-[11px] text-slate-600">
+                    {edge.origin === 'llm' ? (
+                      <span className="font-medium text-purple-700">AI reasoning: </span>
+                    ) : null}
+                    {edge.why}
+                  </div>
                 ) : null}
               </li>
             );

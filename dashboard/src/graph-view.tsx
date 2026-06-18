@@ -90,7 +90,7 @@ export function GraphView({ graph }: { graph: PrGraph }) {
           className="w-64 rounded border border-slate-300 px-2 py-1 text-xs"
         />
         <div className="text-[10px] text-slate-500">
-          solid = static import · dashed purple = LLM-inferred
+          solid = static import · dashed purple = AI-suggested
         </div>
       </div>
       <ReactFlow
