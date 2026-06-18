@@ -39,7 +39,6 @@ interface ViewedState {
   // Bind the store to a PR identity, hydrating its viewed set from localStorage. Re-binding to
   // a different PR swaps in that PR's set, so switching PRs never leaks progress between them.
   bindToPr: (owner: string, repo: string, number: number) => void;
-  isViewed: (path: string) => boolean;
   toggle: (path: string) => void;
 }
 
@@ -51,7 +50,6 @@ export const useViewedState = create<ViewedState>((set, get) => ({
     if (get().currentKey === key) return;
     set({ currentKey: key, viewedPaths: readViewedPaths(key) });
   },
-  isViewed: (path) => get().viewedPaths.has(path),
   toggle: (path) => {
     const { currentKey, viewedPaths } = get();
     const nextPaths = new Set(viewedPaths);

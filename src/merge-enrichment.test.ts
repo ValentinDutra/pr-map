@@ -12,6 +12,7 @@ const baseGraph: PrGraph = {
     author: 'octocat',
     baseRef: 'main',
     headRef: 'feature',
+    headSha: 'shafeature',
   },
   nodes: [
     { id: 'src/a.ts', path: 'src/a.ts', language: 'typescript', inPr: true },

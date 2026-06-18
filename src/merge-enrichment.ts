@@ -47,6 +47,11 @@ export function mergeEnrichment(graph: PrGraph, results: EnrichmentResult[]): Pr
           inPr: false,
         });
       }
+      // Clamp the model-provided confidence into [0, 1] (defaulting a missing/NaN value to a
+      // neutral 0.5) so the dashboard never renders a nonsensical percentage.
+      const confidence = Number.isFinite(semantic.confidence)
+        ? Math.min(1, Math.max(0, semantic.confidence))
+        : 0.5;
       const edge: GraphEdge = {
         id,
         source: result.path,
@@ -54,7 +59,7 @@ export function mergeEnrichment(graph: PrGraph, results: EnrichmentResult[]): Pr
         kind: 'semantic',
         direction: 'outgoing',
         origin: 'llm',
-        confidence: semantic.confidence,
+        confidence,
         why: semantic.why,
       };
       edgesById.set(id, edge);

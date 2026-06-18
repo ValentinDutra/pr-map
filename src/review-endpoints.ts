@@ -184,7 +184,8 @@ export async function submitReview(
   }
 
   // File-level comments are rejected by the bulk reviews endpoint, so post them individually
-  // against the head commit before submitting the review.
+  // against the head commit before submitting the review. Each one is removed from the pending
+  // store the moment it posts, so a resubmit after a later failure never double-posts it.
   if (fileComments.length > 0) {
     const headSha = await ghClient.getHeadSha(state.prNumber);
     if (!isOk(headSha)) return headSha;
@@ -196,6 +197,10 @@ export async function submitReview(
         fileComment.body,
       );
       if (!isOk(posted)) return posted;
+      await store.update((current) => ({
+        ...current,
+        comments: current.comments.filter((comment) => comment.id !== fileComment.id),
+      }));
     }
   }
 

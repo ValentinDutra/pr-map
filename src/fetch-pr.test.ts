@@ -13,6 +13,7 @@ const baseMeta: PrMeta = {
   author: 'octocat',
   baseRef: 'main',
   headRef: 'feature/discount',
+  headSha: 'abc123sha',
 };
 
 interface FakeOptions {
@@ -77,7 +78,8 @@ describe('fetchPr', () => {
       expect(result.value.files[0].content).toBe('content:src/a.ts');
       expect(result.value.files[1].content).toBeUndefined();
     }
-    expect(contentCalls).toEqual([{ path: 'src/a.ts', ref: 'feature/discount' }]);
+    // Content is fetched by the immutable head SHA, not the branch name.
+    expect(contentCalls).toEqual([{ path: 'src/a.ts', ref: 'abc123sha' }]);
   });
 
   it('tolerates a per-file content failure without failing the whole fetch', async () => {

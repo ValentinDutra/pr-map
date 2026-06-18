@@ -1,7 +1,7 @@
 import express, { type Express } from 'express';
 import type { Server } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { existsSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,7 +19,10 @@ import {
 import type { PrGraph } from './types.js';
 
 const DEFAULT_PORT = 5598;
-const PID_FILE = join(tmpdir(), 'pr-map-server.pid');
+// One PID file per server, named by port, under a shared directory — so concurrent dashboards
+// (reviewing two PRs at once) don't clobber each other's PID. The SessionEnd cleanup hook kills
+// every PID in this directory.
+const PID_DIR = join(tmpdir(), 'pr-map-server-pids');
 
 // Resolve the dashboard whether running bundled (pr-map-plugin/dist/server.js, dashboard at
 // ../dashboard-dist) or from source in dev (src/server.js, dashboard at ../dashboard/dist).
@@ -65,7 +68,15 @@ export function createApp(deps: ServerDeps): Express {
 
   app.use(express.static(DASHBOARD_DIST));
   app.get('*', (_request, response) => {
-    response.sendFile(join(DASHBOARD_DIST, 'index.html'));
+    response.sendFile(join(DASHBOARD_DIST, 'index.html'), (error) => {
+      // A missing index.html (dashboard not built) would otherwise surface as an opaque
+      // Express error; return a clear message instead.
+      if (error && !response.headersSent) {
+        response
+          .status(500)
+          .json({ error: 'Dashboard build not found. Run `npm run build:plugin`.' });
+      }
+    });
   });
 
   return app;
@@ -90,13 +101,18 @@ function listen(app: Express, port: number): Promise<Server> {
 // Register handlers that stop accepting new connections, close the HTTP server, and exit 0
 // when the parent process signals shutdown (e.g. the SessionEnd cleanup hook sends SIGTERM).
 // A guard ensures the shutdown sequence runs only once even if multiple signals arrive.
-function registerGracefulShutdown(server: Server): void {
+function registerGracefulShutdown(server: Server, pidFile: string): void {
   let shuttingDown = false;
 
   const shutdown = (signal: NodeJS.Signals): void => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`pr-map dashboard shutting down (${signal})`);
+    try {
+      rmSync(pidFile, { force: true });
+    } catch {
+      // Best effort: the cleanup hook also removes stale PID files.
+    }
     server.close(() => process.exit(0));
   };
 
@@ -120,10 +136,12 @@ export async function startServer(
   for (let attempt = 0; attempt < 20; attempt += 1) {
     try {
       const server = await listen(app, port);
-      registerGracefulShutdown(server);
-      // Record the PID at a fixed path so the SessionEnd cleanup hook can find and kill it.
+      const pidFile = join(PID_DIR, `${port}.pid`);
+      registerGracefulShutdown(server, pidFile);
+      // Record the PID (one file per port) so the SessionEnd cleanup hook can find and kill it.
       try {
-        writeFileSync(PID_FILE, String(process.pid));
+        mkdirSync(PID_DIR, { recursive: true });
+        writeFileSync(pidFile, String(process.pid));
       } catch {
         // Non-fatal: cleanup hook just won't find a pid file.
       }

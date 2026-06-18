@@ -10,6 +10,7 @@ const meta: PrMeta = {
   author: 'octocat',
   baseRef: 'main',
   headRef: 'feature/discount',
+  headSha: 'shadiscount',
 };
 
 // Every file the (imaginary) repo tracks, including unchanged neighbors.

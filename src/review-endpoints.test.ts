@@ -164,6 +164,22 @@ describe('submitReview', () => {
     expect((await store.load()).comments).toHaveLength(1);
   });
 
+  it('drops a file comment from the store once it posts, even if the review then fails', async () => {
+    const store = memoryStore(7);
+    const makeId = sequentialIds();
+    await addComment(store, { scope: 'file', path: 'a.ts', body: 'whole-file note' }, makeId);
+    await addComment(store, { scope: 'line', path: 'a.ts', line: 5, body: 'inline' }, makeId);
+    const { client, fileComments } = fakeGhClient(err({ message: 'review rejected' }));
+
+    const result = await submitReview(store, client, 'COMMENT');
+
+    // The file comment posts exactly once; the review then fails; the posted file comment is
+    // removed from the store so a resubmit re-posts the review but not the file comment.
+    expect(fileComments).toHaveLength(1);
+    expect(result.ok).toBe(false);
+    expect((await store.load()).comments.map((comment) => comment.scope)).toEqual(['line']);
+  });
+
   it('refuses an empty COMMENT review without calling GitHub', async () => {
     const store = memoryStore(7);
     const { client, submissions } = fakeGhClient(ok('created'));
