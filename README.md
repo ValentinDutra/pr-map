@@ -146,7 +146,3 @@ npm run build:plugin   # build the dashboard and bundle the plugin into pr-map-p
 `build:plugin` builds `dashboard/` and bundles the runtime into self-contained `node`
 scripts under `pr-map-plugin/dist` plus the dashboard under
 `pr-map-plugin/dashboard-dist`, which is what the installed plugin runs.
-
-## License
-
-MIT.
