@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { PrGraph, ReviewState } from './types';
+import type { ExistingDiscussion, PrGraph, ReviewState } from './types';
 import { reviewApi } from './review-api';
 import { useReviewRefresh } from './store';
 import { DetailPanel } from './detail-panel';
@@ -7,6 +7,7 @@ import { ReviewControls } from './review-controls';
 
 export function Sidebar({ graph, width }: { graph: PrGraph; width: number }) {
   const [pending, setPending] = useState<ReviewState | null>(null);
+  const [existing, setExisting] = useState<ExistingDiscussion | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const version = useReviewRefresh((state) => state.version);
 
@@ -22,12 +23,27 @@ export function Sidebar({ graph, width }: { graph: PrGraph; width: number }) {
     refresh();
   }, [refresh, version]);
 
+  // The PR's already-posted discussion is read-only, so fetch it once on mount and reuse it
+  // for every selected file rather than refetching per render.
+  useEffect(() => {
+    reviewApi
+      .getExisting()
+      .then(setExisting)
+      .catch(() => undefined);
+  }, []);
+
   return (
     <aside
       style={{ width }}
       className="flex h-full shrink-0 flex-col gap-4 overflow-auto bg-white p-5 text-sm text-slate-800 dark:bg-slate-900 dark:text-slate-100"
     >
-      <DetailPanel graph={graph} pending={pending} onChange={refresh} setStatus={setStatus} />
+      <DetailPanel
+        graph={graph}
+        pending={pending}
+        existing={existing}
+        onChange={refresh}
+        setStatus={setStatus}
+      />
       <ReviewControls
         pending={pending}
         refresh={refresh}

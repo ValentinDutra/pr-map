@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import type { DetailTab } from './store';
-import type { GraphEdge, PrGraph, ReviewState } from './types';
+import type { ExistingDiscussion, GraphEdge, PrGraph, ReviewState } from './types';
 import { useSelection, usePanelTab } from './store';
 import { DiffView } from './diff-view';
 import { AiSuggestionBadge } from './ai-suggestion-badge';
+import { formatCommentTimestamp } from './format';
 import { reviewApi } from './review-api';
 
 function originBadge(edge: GraphEdge): string {
@@ -40,11 +41,12 @@ const TABS: { id: DetailTab; label: string }[] = [
 interface DetailPanelProps {
   graph: PrGraph;
   pending: ReviewState | null;
+  existing: ExistingDiscussion | null;
   onChange: () => void;
   setStatus: (status: string | null) => void;
 }
 
-export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanelProps) {
+export function DetailPanel({ graph, pending, existing, onChange, setStatus }: DetailPanelProps) {
   const selectedNodeId = useSelection((state) => state.selectedNodeId);
   const activeTab = usePanelTab((state) => state.activeTab);
   const setTab = usePanelTab((state) => state.setTab);
@@ -76,6 +78,9 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
     (edge) => edge.source === node.id || edge.target === node.id,
   );
   const fileComments = (pending?.comments ?? []).filter((comment) => comment.path === node.path);
+  const existingFileComments = (existing?.reviewComments ?? []).filter(
+    (comment) => comment.path === node.path,
+  );
 
   return (
     <section className="flex flex-col gap-3">
@@ -200,6 +205,7 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
             patch={node.patch}
             path={node.path}
             comments={fileComments}
+            existingComments={existingFileComments}
             onChange={onChange}
             setStatus={setStatus}
           />
@@ -212,6 +218,28 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
 
       {activeTab === 'conversation' ? (
         <div className="flex flex-col gap-2">
+          {existing && existing.conversationComments.length > 0 ? (
+            <div className="flex flex-col gap-2">
+              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+                Existing comments ({existing.conversationComments.length})
+              </div>
+              {existing.conversationComments.map((comment) => (
+                <div
+                  key={comment.id}
+                  className="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-200"
+                >
+                  <div className="mb-1 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                    <span className="font-medium text-slate-600 dark:text-slate-300">
+                      {comment.author}
+                    </span>
+                    <span>·</span>
+                    <span>{formatCommentTimestamp(comment.createdAt)}</span>
+                  </div>
+                  <div className="whitespace-pre-wrap break-words">{comment.body}</div>
+                </div>
+              ))}
+            </div>
+          ) : null}
           <p className="text-xs text-slate-500 dark:text-slate-400">
             A standalone PR comment, posted to the Conversation tab on GitHub immediately.
           </p>

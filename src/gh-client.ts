@@ -1,7 +1,13 @@
 import { spawn } from 'node:child_process';
 import { type Result, ok, err, isOk } from './result.js';
 import { retry, type RetryOptions } from './retry.js';
-import type { CommentSide, NodeStatus, PrMeta } from './types.js';
+import type {
+  CommentSide,
+  ExistingConversationComment,
+  ExistingReviewComment,
+  NodeStatus,
+  PrMeta,
+} from './types.js';
 
 export interface GhError {
   message: string;
@@ -65,6 +71,12 @@ export interface GhClient {
     prNumber: number,
     body: string,
   ): Promise<Result<string, GhError>>;
+  listReviewComments(
+    prNumber: number,
+  ): Promise<Result<ExistingReviewComment[], GhError>>;
+  listConversationComments(
+    prNumber: number,
+  ): Promise<Result<ExistingConversationComment[], GhError>>;
 }
 
 const DEFAULT_RETRY_OPTIONS: RetryOptions = { attempts: 3, delayMs: 300 };
@@ -194,6 +206,26 @@ export function createGhClient(
         JSON.stringify({ body }),
       );
     },
+
+    async listReviewComments(prNumber) {
+      const raw = await run([
+        'api',
+        `repos/{owner}/{repo}/pulls/${prNumber}/comments`,
+        '--paginate',
+      ]);
+      if (!isOk(raw)) return raw;
+      return parseReviewComments(raw.value);
+    },
+
+    async listConversationComments(prNumber) {
+      const raw = await run([
+        'api',
+        `repos/{owner}/{repo}/issues/${prNumber}/comments`,
+        '--paginate',
+      ]);
+      if (!isOk(raw)) return raw;
+      return parseConversationComments(raw.value);
+    },
   };
 }
 
@@ -231,6 +263,59 @@ function parsePrMetadata(raw: string): Result<PrMeta, GhError> {
     baseRef: parsed.value.baseRefName,
     headRef: parsed.value.headRefName,
   });
+}
+
+interface RawReviewComment {
+  id: number;
+  path: string;
+  line: number | null;
+  original_line: number | null;
+  side: string | null;
+  body: string;
+  user: { login: string } | null;
+  created_at: string;
+  in_reply_to_id?: number;
+}
+
+interface RawConversationComment {
+  id: number;
+  body: string;
+  user: { login: string } | null;
+  created_at: string;
+}
+
+function parseReviewComments(raw: string): Result<ExistingReviewComment[], GhError> {
+  const parsed = parseJson<RawReviewComment[]>(raw);
+  if (!isOk(parsed)) return parsed;
+  return ok(
+    parsed.value.map((comment) => ({
+      id: comment.id,
+      path: comment.path,
+      // GitHub returns line on the current diff, falling back to original_line when the
+      // commented line is outdated against the latest push.
+      line: comment.line ?? comment.original_line,
+      side: comment.side === 'LEFT' ? 'LEFT' : 'RIGHT',
+      body: comment.body,
+      author: comment.user?.login ?? '',
+      createdAt: comment.created_at,
+      inReplyToId: comment.in_reply_to_id ?? null,
+    })),
+  );
+}
+
+function parseConversationComments(
+  raw: string,
+): Result<ExistingConversationComment[], GhError> {
+  const parsed = parseJson<RawConversationComment[]>(raw);
+  if (!isOk(parsed)) return parsed;
+  return ok(
+    parsed.value.map((comment) => ({
+      id: comment.id,
+      body: comment.body,
+      author: comment.user?.login ?? '',
+      createdAt: comment.created_at,
+    })),
+  );
 }
 
 function parseChangedFiles(raw: string): Result<ChangedFile[], GhError> {

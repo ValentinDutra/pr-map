@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   addComment,
   buildSubmission,
+  getExisting,
   submitReview,
   type ReviewStore,
 } from './review-endpoints.js';
@@ -179,5 +180,65 @@ describe('submitReview', () => {
 
     expect(result.ok).toBe(false);
     expect(submissions).toHaveLength(0);
+  });
+});
+
+describe('getExisting', () => {
+  it('returns the PR review and conversation comments for the tracked PR', async () => {
+    const store = memoryStore(7);
+    const calls: number[] = [];
+    const client = {
+      listReviewComments: (prNumber: number) => {
+        calls.push(prNumber);
+        return Promise.resolve(
+          ok([
+            {
+              id: 1,
+              path: 'a.ts',
+              line: 5,
+              side: 'RIGHT' as const,
+              body: 'inline',
+              author: 'octocat',
+              createdAt: '2026-06-01T00:00:00Z',
+              inReplyToId: null,
+            },
+          ]),
+        );
+      },
+      listConversationComments: (prNumber: number) => {
+        calls.push(prNumber);
+        return Promise.resolve(
+          ok([
+            { id: 2, body: 'general', author: 'reviewer', createdAt: '2026-06-02T00:00:00Z' },
+          ]),
+        );
+      },
+    } as unknown as GhClient;
+
+    const result = await getExisting(store, client);
+
+    expect(calls).toEqual([7, 7]);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.value.reviewComments).toHaveLength(1);
+      expect(result.value.conversationComments).toHaveLength(1);
+    }
+  });
+
+  it('errors without calling GitHub when the PR number is unknown', async () => {
+    const store = memoryStore(0);
+    let called = false;
+    const client = {
+      listReviewComments: () => {
+        called = true;
+        return Promise.resolve(ok([]));
+      },
+      listConversationComments: () => Promise.resolve(ok([])),
+    } as unknown as GhClient;
+
+    const result = await getExisting(store, client);
+
+    expect(result.ok).toBe(false);
+    expect(called).toBe(false);
   });
 });

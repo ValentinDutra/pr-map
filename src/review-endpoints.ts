@@ -4,7 +4,13 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { type Result, err, ok, isOk } from './result.js';
 import type { GhClient, GhError, ReviewEvent, ReviewSubmission } from './gh-client.js';
-import type { CommentScope, CommentSide, ReviewState } from './types.js';
+import type {
+  CommentScope,
+  CommentSide,
+  ExistingConversationComment,
+  ExistingReviewComment,
+  ReviewState,
+} from './types.js';
 
 export interface ReviewStore {
   load(): Promise<ReviewState>;
@@ -48,6 +54,33 @@ export function setSummary(store: ReviewStore, summaryBody: string): Promise<Rev
 
 export function getPending(store: ReviewStore): Promise<ReviewState> {
   return store.load();
+}
+
+export interface ExistingDiscussion {
+  reviewComments: ExistingReviewComment[];
+  conversationComments: ExistingConversationComment[];
+}
+
+// The discussion already on the PR (read-only): inline review comments plus PR-level
+// conversation comments, fetched from GitHub for the PR the store is tracking.
+export async function getExisting(
+  store: ReviewStore,
+  ghClient: GhClient,
+): Promise<Result<ExistingDiscussion, GhError>> {
+  const state = await store.load();
+  if (state.prNumber <= 0) {
+    return err({
+      message: 'PR number is unknown; regenerate graph.json before loading the discussion.',
+    });
+  }
+  const reviewComments = await ghClient.listReviewComments(state.prNumber);
+  if (!isOk(reviewComments)) return reviewComments;
+  const conversationComments = await ghClient.listConversationComments(state.prNumber);
+  if (!isOk(conversationComments)) return conversationComments;
+  return ok({
+    reviewComments: reviewComments.value,
+    conversationComments: conversationComments.value,
+  });
 }
 
 // The bulk review carries the verdict, the summary body, and line-scoped comments (with
@@ -301,6 +334,26 @@ export function createReviewRouter(deps: ReviewRouterDeps): Router {
       const result = await submitReview(deps.store, deps.ghClient, event, body);
       if (isOk(result)) {
         response.json({ ok: true });
+      } else {
+        response.status(502).json({ error: result.error.message });
+      }
+    }),
+  );
+
+  return router;
+}
+
+// Mounted at /api/existing: serves the PR's already-posted discussion (read-only). It shares
+// the review deps so it reads the same PR number the review routes write against.
+export function createExistingRouter(deps: ReviewRouterDeps): Router {
+  const router = Router();
+
+  router.get(
+    '/',
+    wrap(async (_request, response) => {
+      const result = await getExisting(deps.store, deps.ghClient);
+      if (isOk(result)) {
+        response.json(result.value);
       } else {
         response.status(502).json({ error: result.error.message });
       }
