@@ -43,6 +43,7 @@ function fakeGhClient(options: FakeOptions): {
     createConversationComment: () => Promise.resolve(ok('')),
     listReviewComments: () => Promise.resolve(ok([])),
     listConversationComments: () => Promise.resolve(ok([])),
+    listChecks: () => Promise.resolve(ok({ state: 'success', checks: [] })),
   };
   return { client, contentCalls };
 }

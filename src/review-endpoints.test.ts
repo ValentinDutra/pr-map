@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   addComment,
   buildSubmission,
+  getChecks,
   getExisting,
   submitReview,
   type ReviewStore,
@@ -237,6 +238,45 @@ describe('getExisting', () => {
     } as unknown as GhClient;
 
     const result = await getExisting(store, client);
+
+    expect(result.ok).toBe(false);
+    expect(called).toBe(false);
+  });
+});
+
+describe('getChecks', () => {
+  it('returns the checks summary for the tracked PR', async () => {
+    const store = memoryStore(7);
+    const calls: number[] = [];
+    const summary = {
+      state: 'success' as const,
+      checks: [{ name: 'unit', status: 'completed', conclusion: 'success', url: null }],
+    };
+    const client = {
+      listChecks: (prNumber: number) => {
+        calls.push(prNumber);
+        return Promise.resolve(ok(summary));
+      },
+    } as unknown as GhClient;
+
+    const result = await getChecks(store, client);
+
+    expect(calls).toEqual([7]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toEqual(summary);
+  });
+
+  it('errors without calling GitHub when the PR number is unknown', async () => {
+    const store = memoryStore(0);
+    let called = false;
+    const client = {
+      listChecks: () => {
+        called = true;
+        return Promise.resolve(ok({ state: 'success', checks: [] }));
+      },
+    } as unknown as GhClient;
+
+    const result = await getChecks(store, client);
 
     expect(result.ok).toBe(false);
     expect(called).toBe(false);
