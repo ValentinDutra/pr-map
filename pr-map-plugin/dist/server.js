@@ -23885,7 +23885,7 @@ var require_express2 = __commonJS({
 // src/server.ts
 var import_express2 = __toESM(require_express2(), 1);
 import { readFile as readFile2 } from "node:fs/promises";
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join as join2, resolve } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
@@ -24438,7 +24438,7 @@ function delay(milliseconds) {
 
 // src/gh-client.ts
 var DEFAULT_RETRY_OPTIONS = { attempts: 3, delayMs: 300 };
-var PR_METADATA_FIELDS = "number,title,body,author,baseRefName,headRefName,url";
+var PR_METADATA_FIELDS = "number,title,body,author,baseRefName,headRefName,headRefOid,url";
 var REVIEW_THREADS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
@@ -24652,12 +24652,15 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       const checkRunsRaw = await run([
         "api",
         `repos/{owner}/{repo}/commits/${sha}/check-runs`,
-        "--paginate"
+        "--paginate",
+        "--slurp"
       ]);
       if (!isOk(checkRunsRaw)) return checkRunsRaw;
       const combinedStatusRaw = await run([
         "api",
-        `repos/{owner}/{repo}/commits/${sha}/status`
+        `repos/{owner}/{repo}/commits/${sha}/status`,
+        "--paginate",
+        "--slurp"
       ]);
       if (!isOk(combinedStatusRaw)) return combinedStatusRaw;
       return parseChecks(checkRunsRaw.value, combinedStatusRaw.value);
@@ -24686,7 +24689,8 @@ function parsePrMetadata(raw) {
     description: parsed.value.body ?? "",
     author: parsed.value.author?.login ?? "",
     baseRef: parsed.value.baseRefName,
-    headRef: parsed.value.headRefName
+    headRef: parsed.value.headRefName,
+    headSha: parsed.value.headRefOid ?? ""
   });
 }
 function parseReviewComments(raw) {
@@ -24770,18 +24774,21 @@ var FAILURE_CONCLUSIONS = /* @__PURE__ */ new Set([
   "action_required"
 ]);
 function parseChecks(checkRunsRaw, combinedStatusRaw) {
-  const checkRunsParsed = parseJson(checkRunsRaw);
-  if (!isOk(checkRunsParsed)) return checkRunsParsed;
-  const combinedParsed = parseJson(combinedStatusRaw);
-  if (!isOk(combinedParsed)) return combinedParsed;
+  const checkRunsPages = parseJson(checkRunsRaw);
+  if (!isOk(checkRunsPages)) return checkRunsPages;
+  const combinedPages = parseJson(combinedStatusRaw);
+  if (!isOk(combinedPages)) return combinedPages;
+  const checkRuns = checkRunsPages.value.flatMap((page) => page.check_runs ?? []);
+  const statuses = combinedPages.value.flatMap((page) => page.statuses ?? []);
+  const combinedState = combinedPages.value[0]?.state ?? "success";
   const checks = [
-    ...(checkRunsParsed.value.check_runs ?? []).map((run) => ({
+    ...checkRuns.map((run) => ({
       name: run.name,
       status: run.status,
       conclusion: run.conclusion ?? "",
       url: run.html_url ?? run.details_url ?? null
     })),
-    ...(combinedParsed.value.statuses ?? []).map((status) => ({
+    ...statuses.map((status) => ({
       name: status.context,
       // Legacy statuses have no lifecycle field; map their state onto status/conclusion so the
       // rollup treats a pending status as in-flight and a non-pending one as completed.
@@ -24790,7 +24797,7 @@ function parseChecks(checkRunsRaw, combinedStatusRaw) {
       url: status.target_url ?? null
     }))
   ];
-  return ok({ state: computeOverallState(checks, combinedParsed.value.state), checks });
+  return ok({ state: computeOverallState(checks, combinedState), checks });
 }
 function computeOverallState(checks, combinedState) {
   const anyPending = combinedState === "pending" || checks.some((check) => check.status === "queued" || check.status === "in_progress");
@@ -24987,6 +24994,10 @@ async function submitReview(store, ghClient, event, summaryBody) {
         fileComment.body
       );
       if (!isOk(posted)) return posted;
+      await store.update((current) => ({
+        ...current,
+        comments: current.comments.filter((comment) => comment.id !== fileComment.id)
+      }));
     }
   }
   if (event === "APPROVE" || hasReviewContent) {
@@ -25251,7 +25262,7 @@ function createThreadsRouter(deps) {
 
 // src/server.ts
 var DEFAULT_PORT = 5598;
-var PID_FILE = join2(tmpdir(), "pr-map-server.pid");
+var PID_DIR = join2(tmpdir(), "pr-map-server-pids");
 function resolveDashboardDist() {
   for (const candidate of ["../dashboard-dist", "../dashboard/dist"]) {
     const resolved = fileURLToPath2(new URL(candidate, import.meta.url));
@@ -25281,7 +25292,11 @@ function createApp(deps) {
   });
   app.use(import_express2.default.static(DASHBOARD_DIST));
   app.get("*", (_request, response) => {
-    response.sendFile(join2(DASHBOARD_DIST, "index.html"));
+    response.sendFile(join2(DASHBOARD_DIST, "index.html"), (error) => {
+      if (error && !response.headersSent) {
+        response.status(500).json({ error: "Dashboard build not found. Run `npm run build:plugin`." });
+      }
+    });
   });
   return app;
 }
@@ -25299,12 +25314,16 @@ function listen(app, port) {
     server.on("error", (error) => rejectPromise(error));
   });
 }
-function registerGracefulShutdown(server) {
+function registerGracefulShutdown(server, pidFile) {
   let shuttingDown = false;
   const shutdown = (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`pr-map dashboard shutting down (${signal})`);
+    try {
+      rmSync(pidFile, { force: true });
+    } catch {
+    }
     server.close(() => process.exit(0));
   };
   for (const signal of ["SIGTERM", "SIGINT"]) {
@@ -25322,9 +25341,11 @@ async function startServer(dataDir, preferredPort = DEFAULT_PORT) {
   for (let attempt = 0; attempt < 20; attempt += 1) {
     try {
       const server = await listen(app, port);
-      registerGracefulShutdown(server);
+      const pidFile = join2(PID_DIR, `${port}.pid`);
+      registerGracefulShutdown(server, pidFile);
       try {
-        writeFileSync(PID_FILE, String(process.pid));
+        mkdirSync(PID_DIR, { recursive: true });
+        writeFileSync(pidFile, String(process.pid));
       } catch {
       }
       const url = `http://localhost:${port}`;

@@ -73,6 +73,7 @@ function mergeEnrichment(graph, results) {
           inPr: false
         });
       }
+      const confidence = Number.isFinite(semantic.confidence) ? Math.min(1, Math.max(0, semantic.confidence)) : 0.5;
       const edge = {
         id,
         source: result.path,
@@ -80,7 +81,7 @@ function mergeEnrichment(graph, results) {
         kind: "semantic",
         direction: "outgoing",
         origin: "llm",
-        confidence: semantic.confidence,
+        confidence,
         why: semantic.why
       };
       edgesById.set(id, edge);

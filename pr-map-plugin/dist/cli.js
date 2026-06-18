@@ -37,7 +37,7 @@ function delay(milliseconds) {
 
 // src/gh-client.ts
 var DEFAULT_RETRY_OPTIONS = { attempts: 3, delayMs: 300 };
-var PR_METADATA_FIELDS = "number,title,body,author,baseRefName,headRefName,url";
+var PR_METADATA_FIELDS = "number,title,body,author,baseRefName,headRefName,headRefOid,url";
 var REVIEW_THREADS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
@@ -251,12 +251,15 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       const checkRunsRaw = await run([
         "api",
         `repos/{owner}/{repo}/commits/${sha}/check-runs`,
-        "--paginate"
+        "--paginate",
+        "--slurp"
       ]);
       if (!isOk(checkRunsRaw)) return checkRunsRaw;
       const combinedStatusRaw = await run([
         "api",
-        `repos/{owner}/{repo}/commits/${sha}/status`
+        `repos/{owner}/{repo}/commits/${sha}/status`,
+        "--paginate",
+        "--slurp"
       ]);
       if (!isOk(combinedStatusRaw)) return combinedStatusRaw;
       return parseChecks(checkRunsRaw.value, combinedStatusRaw.value);
@@ -285,7 +288,8 @@ function parsePrMetadata(raw) {
     description: parsed.value.body ?? "",
     author: parsed.value.author?.login ?? "",
     baseRef: parsed.value.baseRefName,
-    headRef: parsed.value.headRefName
+    headRef: parsed.value.headRefName,
+    headSha: parsed.value.headRefOid ?? ""
   });
 }
 function parseReviewComments(raw) {
@@ -369,18 +373,21 @@ var FAILURE_CONCLUSIONS = /* @__PURE__ */ new Set([
   "action_required"
 ]);
 function parseChecks(checkRunsRaw, combinedStatusRaw) {
-  const checkRunsParsed = parseJson(checkRunsRaw);
-  if (!isOk(checkRunsParsed)) return checkRunsParsed;
-  const combinedParsed = parseJson(combinedStatusRaw);
-  if (!isOk(combinedParsed)) return combinedParsed;
+  const checkRunsPages = parseJson(checkRunsRaw);
+  if (!isOk(checkRunsPages)) return checkRunsPages;
+  const combinedPages = parseJson(combinedStatusRaw);
+  if (!isOk(combinedPages)) return combinedPages;
+  const checkRuns = checkRunsPages.value.flatMap((page) => page.check_runs ?? []);
+  const statuses = combinedPages.value.flatMap((page) => page.statuses ?? []);
+  const combinedState = combinedPages.value[0]?.state ?? "success";
   const checks = [
-    ...(checkRunsParsed.value.check_runs ?? []).map((run) => ({
+    ...checkRuns.map((run) => ({
       name: run.name,
       status: run.status,
       conclusion: run.conclusion ?? "",
       url: run.html_url ?? run.details_url ?? null
     })),
-    ...(combinedParsed.value.statuses ?? []).map((status) => ({
+    ...statuses.map((status) => ({
       name: status.context,
       // Legacy statuses have no lifecycle field; map their state onto status/conclusion so the
       // rollup treats a pending status as in-flight and a non-pending one as completed.
@@ -389,7 +396,7 @@ function parseChecks(checkRunsRaw, combinedStatusRaw) {
       url: status.target_url ?? null
     }))
   ];
-  return ok({ state: computeOverallState(checks, combinedParsed.value.state), checks });
+  return ok({ state: computeOverallState(checks, combinedState), checks });
 }
 function computeOverallState(checks, combinedState) {
   const anyPending = combinedState === "pending" || checks.some((check) => check.status === "queued" || check.status === "in_progress");
@@ -504,7 +511,7 @@ async function fetchPr(ghClient, ref) {
       previousPath: file.previousPath
     };
     if (file.status !== "deleted") {
-      const contentResult = await ghClient.getFileContent(file.path, meta.headRef);
+      const contentResult = await ghClient.getFileContent(file.path, meta.headSha || meta.headRef);
       if (isOk(contentResult)) {
         rawFile.content = contentResult.value;
       }
@@ -987,9 +994,18 @@ function importPatternsFor(prPath) {
   const withoutExtension = prPath.replace(/\.[^./]+$/, "");
   const baseName = withoutExtension.slice(withoutExtension.lastIndexOf("/") + 1);
   const dottedModule = withoutExtension.replace(/\//g, ".");
-  return [.../* @__PURE__ */ new Set([withoutExtension, baseName, dottedModule])].filter(
-    (pattern) => pattern.length > 0
-  );
+  const patterns = [withoutExtension, baseName, dottedModule];
+  if (baseName === "index" || baseName === "__init__") {
+    const directory = withoutExtension.slice(0, withoutExtension.lastIndexOf("/"));
+    if (directory) {
+      patterns.push(
+        directory,
+        directory.slice(directory.lastIndexOf("/") + 1),
+        directory.replace(/\//g, ".")
+      );
+    }
+  }
+  return [...new Set(patterns)].filter((pattern) => pattern.length > 0);
 }
 function addIncomingEdges(nodes, prFiles, repoFiles, gitGrep, readContent, changedSymbolsByPath) {
   const nodesById = new Map(nodes.map((node) => [node.id, node]));
