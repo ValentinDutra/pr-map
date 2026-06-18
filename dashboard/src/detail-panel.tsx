@@ -3,6 +3,7 @@ import type { DetailTab } from './store';
 import type { GraphEdge, PrGraph, ReviewState } from './types';
 import { useSelection, usePanelTab } from './store';
 import { DiffView } from './diff-view';
+import { AiSuggestionBadge } from './ai-suggestion-badge';
 import { reviewApi } from './review-api';
 
 function originBadge(edge: GraphEdge): string {
@@ -119,14 +120,23 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
       {activeTab === 'insights' ? (
         <>
           {node.summary ? (
-            <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{node.summary}</p>
+            <div className="rounded border-l-2 border-purple-300 bg-purple-50/50 p-2 dark:border-purple-700 dark:bg-purple-950/20">
+              <AiSuggestionBadge className="mb-1" />
+              <p className="text-sm leading-relaxed text-slate-700 dark:text-slate-300">{node.summary}</p>
+            </div>
           ) : null}
 
           {node.insights ? (
-            <div>
-              <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                Review insights
+            <div className="rounded border-l-2 border-purple-300 bg-purple-50/50 p-2 dark:border-purple-700 dark:bg-purple-950/20">
+              <div className="mb-0.5 flex items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-slate-400">
+                  AI review suggestions
+                </span>
+                <AiSuggestionBadge />
               </div>
+              <p className="mb-2 text-[11px] text-slate-500 dark:text-slate-400">
+                Suggestions to guide your review — not verified. You decide what's real.
+              </p>
               {node.insights.impact ? (
                 <p className="text-sm text-slate-600 dark:text-slate-300">
                   <span className="font-semibold">Impact:</span> {node.insights.impact}
@@ -169,7 +179,12 @@ export function DetailPanel({ graph, pending, onChange, setStatus }: DetailPanel
                       {edge.affectedSymbol ? ` · ${edge.affectedSymbol}` : ''}
                     </div>
                     {edge.why ? (
-                      <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">{edge.why}</div>
+                      <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                        {edge.origin === 'llm' ? (
+                          <span className="font-medium text-purple-700 dark:text-purple-300">AI reasoning: </span>
+                        ) : null}
+                        {edge.why}
+                      </div>
                     ) : null}
                   </li>
                 );
