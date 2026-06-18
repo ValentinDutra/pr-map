@@ -140,14 +140,17 @@ function ChecksBadge() {
       .then((summary) => {
         if (!cancelled) setChecks(summary);
       })
-      // No checks endpoint (static build) or no checks on the PR: hide the badge silently.
+      // No checks endpoint (static build): hide the badge silently.
       .catch(() => undefined);
     return () => {
       cancelled = true;
     };
   }, []);
 
-  if (!checks) return null;
+  // Hide the badge when the fetch failed (null) or the head commit has no checks at all.
+  // GitHub's combined-status endpoint reports `state: "pending"` for a commit with zero
+  // statuses, so an empty checks list would otherwise render a perpetual amber "pending".
+  if (!checks || checks.checks.length === 0) return null;
 
   const style = CHECKS_BADGE_STYLES[checks.state];
 
