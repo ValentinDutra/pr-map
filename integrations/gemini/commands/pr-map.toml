@@ -1,0 +1,12 @@
+description = "Turn a GitHub PR into an interactive review map (pr-map)."
+
+prompt = """
+Run pr-map for this pull request: {{args}}
+
+1. Confirm the current directory is a checkout of the PR's repository and that `gh auth status` succeeds. If not, stop and tell the user.
+2. Run the standalone pipeline (builds the graph, enriches each file with the configured LLM provider, merges, and opens the dashboard):
+   node "$PRMAP_HOME/pr-map-plugin/dist/pr-map.js" {{args}}
+3. The dashboard opens in the browser. The human reads the diffs and submits the review there.
+
+The AI enrichment is a set of review suggestions, not verified facts. Do NOT submit a review (Approve / Request changes / Comment) on the user's behalf.
+"""

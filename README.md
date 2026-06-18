@@ -60,6 +60,20 @@ What you do in the dashboard: explore the graph, read each file's diff and insig
 mark files as viewed, write comments, and submit a verdict. Submitting is always an
 explicit action you take in the UI — the agent never submits a review on your behalf.
 
+## Use outside Claude Code (Codex, Gemini, or standalone)
+
+Only the AI enrichment step is Claude-specific; the rest of pr-map is plain `node`. The bundled
+engine runs under any coding agent — or standalone with no agent — using a swappable LLM provider
+(local Ollama by default, any OpenAI-compatible endpoint optional). Run the whole pipeline with one
+command:
+
+```
+node "$PRMAP_HOME/pr-map-plugin/dist/pr-map.js" <url|number>
+```
+
+See [`integrations/README.md`](integrations/README.md) for setup, the `PRMAP_LLM_*` provider table,
+and the Codex skill and Gemini extension wrappers.
+
 ## Dashboard features
 
 - Symbol-filtered import graph of the changed files and their one-hop neighbors, with

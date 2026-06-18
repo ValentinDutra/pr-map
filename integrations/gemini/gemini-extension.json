@@ -1,0 +1,6 @@
+{
+  "name": "pr-map",
+  "version": "0.1.0",
+  "description": "Turn a GitHub PR into an interactive review map with AI insights, reviewed in the browser.",
+  "contextFileName": "GEMINI.md"
+}

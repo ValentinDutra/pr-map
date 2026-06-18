@@ -14,6 +14,8 @@ await build({
     cli: 'src/cli.ts',
     server: 'src/server.ts',
     merge: 'src/merge-enrichment.ts',
+    enrich: 'src/enrich.ts',
+    'pr-map': 'src/pr-map.ts',
   },
   outdir: distDir,
   bundle: true,
@@ -29,4 +31,4 @@ await build({
 await rm(dashboardOut, { recursive: true, force: true });
 await cp('dashboard/dist', dashboardOut, { recursive: true });
 
-console.log(`built ${distDir}/{cli,server,merge}.js and ${dashboardOut}/`);
+console.log(`built ${distDir}/{cli,server,merge,enrich,pr-map}.js and ${dashboardOut}/`);
