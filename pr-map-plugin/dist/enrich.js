@@ -1,7 +1,7 @@
 import { createRequire as __createRequire } from 'module'; const require = __createRequire(import.meta.url);
 
 // src/enrich.ts
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { realpathSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -258,19 +258,24 @@ async function enrichGraph(graph, deps) {
   if (changedNodes.length === 0) return [];
   const batchSize = changedNodes.length <= 10 ? 1 : 5;
   const batches = chunk(changedNodes, batchSize);
+  let completed = 0;
   const perBatch = await mapWithConcurrency(batches, deps.concurrency ?? 4, async (batch) => {
     const label = batch.map((node) => node.path).join(", ");
+    let results = [];
     const completion = await deps.provider.complete(buildPrompt(batch, graph));
     if (!isOk(completion)) {
       deps.log?.(`enrichment failed for ${label}: ${completion.error.message}`);
-      return [];
+    } else {
+      const parsed = parseEnrichmentResponse(completion.value);
+      if (!isOk(parsed)) {
+        deps.log?.(`could not parse enrichment for ${label}: ${parsed.error.message}`);
+      } else {
+        results = parsed.value;
+      }
     }
-    const parsed = parseEnrichmentResponse(completion.value);
-    if (!isOk(parsed)) {
-      deps.log?.(`could not parse enrichment for ${label}: ${parsed.error.message}`);
-      return [];
-    }
-    return parsed.value;
+    completed += 1;
+    await deps.onBatch?.(results, { completed, total: batches.length });
+    return results;
   });
   return perBatch.flat();
 }
@@ -286,21 +291,42 @@ async function enrichFromDir(dataDir, env) {
   if (!isOk(providerResult)) return err({ message: providerResult.error.message });
   const parsedConcurrency = env.PRMAP_ENRICH_CONCURRENCY ? Number.parseInt(env.PRMAP_ENRICH_CONCURRENCY, 10) : NaN;
   const concurrency = Number.isFinite(parsedConcurrency) && parsedConcurrency > 0 ? parsedConcurrency : 4;
+  const enrichmentDir = join(dataDir, "enrichment");
+  try {
+    await rm(enrichmentDir, { recursive: true, force: true });
+    await mkdir(enrichmentDir, { recursive: true });
+  } catch (error) {
+    return err({ message: `could not prepare ${enrichmentDir}: ${error.message}` });
+  }
+  const changedCount = graph.nodes.filter((node) => node.inPr).length;
+  console.warn(`pr-map: enriching ${changedCount} changed file(s) with concurrency ${concurrency}...`);
+  let writeCursor = 0;
   const results = await enrichGraph(graph, {
     provider: providerResult.value,
     concurrency,
-    log: (message) => console.warn(`pr-map: ${message}`)
-  });
-  const enrichmentDir = join(dataDir, "enrichment");
-  try {
-    await mkdir(enrichmentDir, { recursive: true });
-    for (let index = 0; index < results.length; index += 1) {
-      const filePath = join(enrichmentDir, `${index}.json`);
-      await writeFile(filePath, JSON.stringify(results[index], null, 2), "utf8");
+    log: (message) => console.warn(`pr-map: ${message}`),
+    onBatch: async (batchResults, progress) => {
+      const startIndex = writeCursor;
+      writeCursor += batchResults.length;
+      const filesThroughHere = writeCursor;
+      await Promise.all(
+        batchResults.map(
+          (result, offset) => writeFile(
+            join(enrichmentDir, `${startIndex + offset}.json`),
+            JSON.stringify(result, null, 2),
+            "utf8"
+          ).catch((error) => {
+            console.warn(
+              `pr-map: could not write enrichment for ${result.path}: ${error.message}`
+            );
+          })
+        )
+      );
+      console.warn(
+        `pr-map: enriched ${progress.completed}/${progress.total} batch(es), ${filesThroughHere} file(s) written`
+      );
     }
-  } catch (error) {
-    return err({ message: `could not write enrichment files: ${error.message}` });
-  }
+  });
   return ok({ enrichmentDir, written: results.length });
 }
 async function main() {
