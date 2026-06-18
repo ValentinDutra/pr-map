@@ -1,4 +1,5 @@
 import express, { type Express } from 'express';
+import type { Server } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { existsSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -71,11 +72,29 @@ async function readPrNumber(dataDir: string): Promise<number> {
   }
 }
 
-function listen(app: Express, port: number): Promise<void> {
+function listen(app: Express, port: number): Promise<Server> {
   return new Promise((resolvePromise, rejectPromise) => {
-    const server = app.listen(port, () => resolvePromise());
+    const server = app.listen(port, () => resolvePromise(server));
     server.on('error', (error) => rejectPromise(error));
   });
+}
+
+// Register handlers that stop accepting new connections, close the HTTP server, and exit 0
+// when the parent process signals shutdown (e.g. the SessionEnd cleanup hook sends SIGTERM).
+// A guard ensures the shutdown sequence runs only once even if multiple signals arrive.
+function registerGracefulShutdown(server: Server): void {
+  let shuttingDown = false;
+
+  const shutdown = (signal: NodeJS.Signals): void => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log(`pr-map dashboard shutting down (${signal})`);
+    server.close(() => process.exit(0));
+  };
+
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    process.on(signal, () => shutdown(signal));
+  }
 }
 
 export async function startServer(
@@ -92,7 +111,8 @@ export async function startServer(
   let port = preferredPort;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     try {
-      await listen(app, port);
+      const server = await listen(app, port);
+      registerGracefulShutdown(server);
       // Record the PID at a fixed path so the SessionEnd cleanup hook can find and kill it.
       try {
         writeFileSync(PID_FILE, String(process.pid));
