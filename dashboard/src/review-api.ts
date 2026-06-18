@@ -2,6 +2,7 @@ import type {
   ChecksSummary,
   CommentScope,
   CommentSide,
+  CommitInfo,
   ExistingDiscussion,
   ReviewEvent,
   ReviewState,
@@ -31,6 +32,8 @@ export const reviewApi = {
     fetch('/api/existing').then((response) => asJson<ExistingDiscussion>(response)),
 
   getChecks: () => fetch('/api/checks').then((response) => asJson<ChecksSummary>(response)),
+
+  getCommits: () => fetch('/api/commits').then((response) => asJson<CommitInfo[]>(response)),
 
   addComment: (input: AddCommentInput) =>
     fetch('/api/review/comment', {

@@ -400,6 +400,53 @@ describe('createGhClient', () => {
     expect(isOk(result)).toBe(false);
   });
 
+  it('listCommits paginates the pulls commits endpoint and normalizes each commit', async () => {
+    const { execute, calls } = recordingExecutor([
+      ok(
+        JSON.stringify([
+          {
+            sha: 'abc1234567890',
+            html_url: 'https://github.com/acme/shop/commit/abc1234567890',
+            commit: {
+              message: 'Add discounts\n\nLonger body explaining the change.',
+              author: { name: 'Ada Lovelace', date: '2026-06-01T00:00:00Z' },
+            },
+            author: { login: 'ada' },
+          },
+          {
+            sha: 'def4567890123',
+            html_url: 'https://github.com/acme/shop/commit/def4567890123',
+            commit: { message: 'Fix typo', author: null },
+            author: { login: 'octocat' },
+          },
+        ]),
+      ),
+    ]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    const result = await client.listCommits(42);
+
+    expect(calls[0].args).toEqual([
+      'api',
+      'repos/{owner}/{repo}/pulls/42/commits',
+      '--paginate',
+    ]);
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value[0]).toEqual({
+        sha: 'abc1234567890',
+        shortSha: 'abc1234',
+        // Only the subject line of the message is kept.
+        message: 'Add discounts',
+        author: 'Ada Lovelace',
+        date: '2026-06-01T00:00:00Z',
+        url: 'https://github.com/acme/shop/commit/abc1234567890',
+      });
+      // Falls back to the GitHub login and an empty date when commit.author is null.
+      expect(result.value[1]).toMatchObject({ author: 'octocat', date: '' });
+    }
+  });
+
   it('getHeadSha returns the trimmed head sha', async () => {
     const { execute, calls } = recordingExecutor([ok('deadbeef\n')]);
     const client = createGhClient(execute, noDelayRetry);

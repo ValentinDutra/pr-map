@@ -5,6 +5,7 @@ import type {
   CheckRun,
   ChecksSummary,
   CommentSide,
+  CommitInfo,
   ExistingConversationComment,
   ExistingReviewComment,
   NodeStatus,
@@ -80,6 +81,7 @@ export interface GhClient {
     prNumber: number,
   ): Promise<Result<ExistingConversationComment[], GhError>>;
   listChecks(prNumber: number): Promise<Result<ChecksSummary, GhError>>;
+  listCommits(prNumber: number): Promise<Result<CommitInfo[], GhError>>;
 }
 
 const DEFAULT_RETRY_OPTIONS: RetryOptions = { attempts: 3, delayMs: 300 };
@@ -255,6 +257,16 @@ export function createGhClient(
 
       return parseChecks(checkRunsRaw.value, combinedStatusRaw.value);
     },
+
+    async listCommits(prNumber) {
+      const raw = await run([
+        'api',
+        `repos/{owner}/{repo}/pulls/${prNumber}/commits`,
+        '--paginate',
+      ]);
+      if (!isOk(raw)) return raw;
+      return parseCommits(raw.value);
+    },
   };
 }
 
@@ -343,6 +355,33 @@ function parseConversationComments(
       body: comment.body,
       author: comment.user?.login ?? '',
       createdAt: comment.created_at,
+    })),
+  );
+}
+
+interface RawCommit {
+  sha: string;
+  html_url: string;
+  commit: {
+    message: string;
+    author: { name?: string; date?: string } | null;
+  };
+  author: { login: string } | null;
+}
+
+function parseCommits(raw: string): Result<CommitInfo[], GhError> {
+  const parsed = parseJson<RawCommit[]>(raw);
+  if (!isOk(parsed)) return parsed;
+  return ok(
+    parsed.value.map((commit) => ({
+      sha: commit.sha,
+      shortSha: commit.sha.slice(0, 7),
+      // Only the subject line; the body (after the first newline) is dropped for the list view.
+      message: commit.commit.message.split('\n')[0],
+      // The git-author name from the commit, falling back to the GitHub login when absent.
+      author: commit.commit.author?.name ?? commit.author?.login ?? '',
+      date: commit.commit.author?.date ?? '',
+      url: commit.html_url,
     })),
   );
 }

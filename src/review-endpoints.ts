@@ -8,6 +8,7 @@ import type {
   ChecksSummary,
   CommentScope,
   CommentSide,
+  CommitInfo,
   ExistingConversationComment,
   ExistingReviewComment,
   ReviewState,
@@ -96,6 +97,21 @@ export async function getChecks(
     });
   }
   return ghClient.listChecks(state.prNumber);
+}
+
+// The commit list for the PR the store is tracking (read-only): sha, subject, author, date,
+// and a link to each commit on GitHub.
+export async function getCommits(
+  store: ReviewStore,
+  ghClient: GhClient,
+): Promise<Result<CommitInfo[], GhError>> {
+  const state = await store.load();
+  if (state.prNumber <= 0) {
+    return err({
+      message: 'PR number is unknown; regenerate graph.json before loading commits.',
+    });
+  }
+  return ghClient.listCommits(state.prNumber);
 }
 
 // The bulk review carries the verdict, the summary body, and line-scoped comments (with
@@ -387,6 +403,26 @@ export function createChecksRouter(deps: ReviewRouterDeps): Router {
     '/',
     wrap(async (_request, response) => {
       const result = await getChecks(deps.store, deps.ghClient);
+      if (isOk(result)) {
+        response.json(result.value);
+      } else {
+        response.status(502).json({ error: result.error.message });
+      }
+    }),
+  );
+
+  return router;
+}
+
+// Mounted at /api/commits: serves the PR's commit list (read-only). It shares the review
+// deps so it reads the same PR number the review routes write against.
+export function createCommitsRouter(deps: ReviewRouterDeps): Router {
+  const router = Router();
+
+  router.get(
+    '/',
+    wrap(async (_request, response) => {
+      const result = await getCommits(deps.store, deps.ghClient);
       if (isOk(result)) {
         response.json(result.value);
       } else {

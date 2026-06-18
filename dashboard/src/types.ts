@@ -104,6 +104,16 @@ export interface ExistingDiscussion {
   conversationComments: ExistingConversationComment[];
 }
 
+// A single commit on the PR (read-only): sha, subject line, author, date, and a GitHub link.
+export interface CommitInfo {
+  sha: string;
+  shortSha: string;
+  message: string;
+  author: string;
+  date: string;
+  url: string;
+}
+
 // The overall CI verdict for the PR's head commit, rolled up across every check.
 export type ChecksState = 'success' | 'failure' | 'pending';
 

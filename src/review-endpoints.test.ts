@@ -3,6 +3,7 @@ import {
   addComment,
   buildSubmission,
   getChecks,
+  getCommits,
   getExisting,
   submitReview,
   type ReviewStore,
@@ -277,6 +278,51 @@ describe('getChecks', () => {
     } as unknown as GhClient;
 
     const result = await getChecks(store, client);
+
+    expect(result.ok).toBe(false);
+    expect(called).toBe(false);
+  });
+});
+
+describe('getCommits', () => {
+  it('returns the commit list for the tracked PR', async () => {
+    const store = memoryStore(7);
+    const calls: number[] = [];
+    const commits = [
+      {
+        sha: 'abc1234',
+        shortSha: 'abc1234',
+        message: 'Add discounts',
+        author: 'octocat',
+        date: '2026-06-01T00:00:00Z',
+        url: 'https://github.com/acme/shop/commit/abc1234',
+      },
+    ];
+    const client = {
+      listCommits: (prNumber: number) => {
+        calls.push(prNumber);
+        return Promise.resolve(ok(commits));
+      },
+    } as unknown as GhClient;
+
+    const result = await getCommits(store, client);
+
+    expect(calls).toEqual([7]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toEqual(commits);
+  });
+
+  it('errors without calling GitHub when the PR number is unknown', async () => {
+    const store = memoryStore(0);
+    let called = false;
+    const client = {
+      listCommits: () => {
+        called = true;
+        return Promise.resolve(ok([]));
+      },
+    } as unknown as GhClient;
+
+    const result = await getCommits(store, client);
 
     expect(result.ok).toBe(false);
     expect(called).toBe(false);
