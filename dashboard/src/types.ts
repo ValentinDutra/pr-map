@@ -104,6 +104,24 @@ export interface ExistingDiscussion {
   conversationComments: ExistingConversationComment[];
 }
 
+// A single comment inside a review thread (read-only).
+export interface ReviewThreadComment {
+  id: number | null;
+  author: string;
+  body: string;
+  createdAt: string;
+}
+
+// A review-comment thread on the PR with its resolved state and the GraphQL node id used to
+// resolve/unresolve it.
+export interface ReviewThread {
+  id: string;
+  isResolved: boolean;
+  path: string;
+  line: number | null;
+  comments: ReviewThreadComment[];
+}
+
 // A single commit on the PR (read-only): sha, subject line, author, date, and a GitHub link.
 export interface CommitInfo {
   sha: string;

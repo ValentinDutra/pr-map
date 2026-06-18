@@ -6,6 +6,7 @@ import type {
   ExistingDiscussion,
   ReviewEvent,
   ReviewState,
+  ReviewThread,
 } from './types';
 
 async function asJson<T>(response: Response): Promise<T> {
@@ -34,6 +35,18 @@ export const reviewApi = {
   getChecks: () => fetch('/api/checks').then((response) => asJson<ChecksSummary>(response)),
 
   getCommits: () => fetch('/api/commits').then((response) => asJson<CommitInfo[]>(response)),
+
+  getThreads: () => fetch('/api/threads').then((response) => asJson<ReviewThread[]>(response)),
+
+  resolveThread: (id: string) =>
+    fetch(`/api/threads/${id}/resolve`, { method: 'POST' }).then((response) =>
+      asJson<{ ok: boolean }>(response),
+    ),
+
+  unresolveThread: (id: string) =>
+    fetch(`/api/threads/${id}/unresolve`, { method: 'POST' }).then((response) =>
+      asJson<{ ok: boolean }>(response),
+    ),
 
   addComment: (input: AddCommentInput) =>
     fetch('/api/review/comment', {

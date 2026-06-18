@@ -99,6 +99,27 @@ export interface ExistingConversationComment {
   createdAt: string;
 }
 
+// A single comment inside a review thread, normalized from the GraphQL reviewThreads query.
+export interface ReviewThreadComment {
+  // The REST comment database id (GraphQL exposes it as databaseId); null when unavailable.
+  id: number | null;
+  author: string;
+  body: string;
+  createdAt: string;
+}
+
+// A review-comment thread on the PR, with its resolved state and the GraphQL node id needed to
+// resolve/unresolve it. Threads are the GraphQL-native grouping the REST comments list lacks.
+export interface ReviewThread {
+  // The GraphQL node id of the thread (passed to the resolve/unresolve mutations).
+  id: string;
+  isResolved: boolean;
+  path: string;
+  // The new-file line the thread is anchored to, from the first comment's line ?? originalLine.
+  line: number | null;
+  comments: ReviewThreadComment[];
+}
+
 // A single commit on the PR, normalized from the pulls/{number}/commits endpoint (read-only).
 export interface CommitInfo {
   sha: string;

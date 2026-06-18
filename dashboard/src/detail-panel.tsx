@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { DetailTab } from './store';
-import type { ExistingDiscussion, GraphEdge, PrGraph, ReviewState } from './types';
+import type { ExistingDiscussion, GraphEdge, PrGraph, ReviewState, ReviewThread } from './types';
 import { useSelection, usePanelTab } from './store';
 import { useViewedState } from './viewed-state';
 import { DiffView } from './diff-view';
@@ -43,11 +43,21 @@ interface DetailPanelProps {
   graph: PrGraph;
   pending: ReviewState | null;
   existing: ExistingDiscussion | null;
+  threads: ReviewThread[] | null;
   onChange: () => void;
+  onThreadsChange: () => void;
   setStatus: (status: string | null) => void;
 }
 
-export function DetailPanel({ graph, pending, existing, onChange, setStatus }: DetailPanelProps) {
+export function DetailPanel({
+  graph,
+  pending,
+  existing,
+  threads,
+  onChange,
+  onThreadsChange,
+  setStatus,
+}: DetailPanelProps) {
   const selectedNodeId = useSelection((state) => state.selectedNodeId);
   const activeTab = usePanelTab((state) => state.activeTab);
   const setTab = usePanelTab((state) => state.setTab);
@@ -88,9 +98,7 @@ export function DetailPanel({ graph, pending, existing, onChange, setStatus }: D
   ).length;
   const isNodeViewed = viewedPaths.has(node.path);
   const fileComments = (pending?.comments ?? []).filter((comment) => comment.path === node.path);
-  const existingFileComments = (existing?.reviewComments ?? []).filter(
-    (comment) => comment.path === node.path,
-  );
+  const fileThreads = (threads ?? []).filter((thread) => thread.path === node.path);
 
   return (
     <section className="flex flex-col gap-3">
@@ -246,8 +254,9 @@ export function DetailPanel({ graph, pending, existing, onChange, setStatus }: D
               patch={node.patch}
               path={node.path}
               comments={fileComments}
-              existingComments={existingFileComments}
+              threads={fileThreads}
               onChange={onChange}
+              onThreadsChange={onThreadsChange}
               setStatus={setStatus}
             />
           )

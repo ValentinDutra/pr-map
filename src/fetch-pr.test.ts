@@ -43,6 +43,9 @@ function fakeGhClient(options: FakeOptions): {
     createConversationComment: () => Promise.resolve(ok('')),
     listReviewComments: () => Promise.resolve(ok([])),
     listConversationComments: () => Promise.resolve(ok([])),
+    listReviewThreads: () => Promise.resolve(ok([])),
+    resolveReviewThread: () => Promise.resolve(ok('')),
+    unresolveReviewThread: () => Promise.resolve(ok('')),
     listChecks: () => Promise.resolve(ok({ state: 'success', checks: [] })),
     listCommits: () => Promise.resolve(ok([])),
   };

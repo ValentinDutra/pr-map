@@ -5,6 +5,7 @@ import {
   getChecks,
   getCommits,
   getExisting,
+  getThreads,
   submitReview,
   type ReviewStore,
 } from './review-endpoints.js';
@@ -239,6 +240,50 @@ describe('getExisting', () => {
     } as unknown as GhClient;
 
     const result = await getExisting(store, client);
+
+    expect(result.ok).toBe(false);
+    expect(called).toBe(false);
+  });
+});
+
+describe('getThreads', () => {
+  it('returns the review threads for the tracked PR', async () => {
+    const store = memoryStore(7);
+    const calls: number[] = [];
+    const threads = [
+      {
+        id: 'PRRT_1',
+        isResolved: false,
+        path: 'a.ts',
+        line: 5,
+        comments: [{ id: 1, author: 'octocat', body: 'inline', createdAt: '2026-06-01T00:00:00Z' }],
+      },
+    ];
+    const client = {
+      listReviewThreads: (prNumber: number) => {
+        calls.push(prNumber);
+        return Promise.resolve(ok(threads));
+      },
+    } as unknown as GhClient;
+
+    const result = await getThreads(store, client);
+
+    expect(calls).toEqual([7]);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.value).toEqual(threads);
+  });
+
+  it('errors without calling GitHub when the PR number is unknown', async () => {
+    const store = memoryStore(0);
+    let called = false;
+    const client = {
+      listReviewThreads: () => {
+        called = true;
+        return Promise.resolve(ok([]));
+      },
+    } as unknown as GhClient;
+
+    const result = await getThreads(store, client);
 
     expect(result.ok).toBe(false);
     expect(called).toBe(false);

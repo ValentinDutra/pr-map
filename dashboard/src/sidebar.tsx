@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ExistingDiscussion, PrGraph, ReviewState } from './types';
+import type { ExistingDiscussion, PrGraph, ReviewState, ReviewThread } from './types';
 import { reviewApi } from './review-api';
 import { useReviewRefresh } from './store';
 import { DetailPanel } from './detail-panel';
@@ -8,6 +8,7 @@ import { ReviewControls } from './review-controls';
 export function Sidebar({ graph, width }: { graph: PrGraph; width: number }) {
   const [pending, setPending] = useState<ReviewState | null>(null);
   const [existing, setExisting] = useState<ExistingDiscussion | null>(null);
+  const [threads, setThreads] = useState<ReviewThread[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const version = useReviewRefresh((state) => state.version);
 
@@ -32,6 +33,19 @@ export function Sidebar({ graph, width }: { graph: PrGraph; width: number }) {
       .catch(() => undefined);
   }, []);
 
+  // Review threads carry resolve state that the dashboard can mutate, so they are re-fetchable:
+  // load on mount and again after every resolve/unresolve so the UI reflects the new state.
+  const refreshThreads = useCallback(() => {
+    reviewApi
+      .getThreads()
+      .then(setThreads)
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    refreshThreads();
+  }, [refreshThreads]);
+
   return (
     <aside
       style={{ width }}
@@ -41,7 +55,9 @@ export function Sidebar({ graph, width }: { graph: PrGraph; width: number }) {
         graph={graph}
         pending={pending}
         existing={existing}
+        threads={threads}
         onChange={refresh}
+        onThreadsChange={refreshThreads}
         setStatus={setStatus}
       />
       <ReviewControls
