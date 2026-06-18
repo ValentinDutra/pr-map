@@ -12,6 +12,7 @@ import type {
   ExistingConversationComment,
   ExistingReviewComment,
   ReviewState,
+  ReviewThread,
 } from './types.js';
 
 export interface ReviewStore {
@@ -83,6 +84,21 @@ export async function getExisting(
     reviewComments: reviewComments.value,
     conversationComments: conversationComments.value,
   });
+}
+
+// The PR's review-comment threads (read-only structure plus their resolved state), for the PR
+// the store is tracking. Resolving/unresolving a thread mutates the state these expose.
+export async function getThreads(
+  store: ReviewStore,
+  ghClient: GhClient,
+): Promise<Result<ReviewThread[], GhError>> {
+  const state = await store.load();
+  if (state.prNumber <= 0) {
+    return err({
+      message: 'PR number is unknown; regenerate graph.json before loading review threads.',
+    });
+  }
+  return ghClient.listReviewThreads(state.prNumber);
 }
 
 // The CI/checks status for the head commit of the PR the store is tracking (read-only).
@@ -425,6 +441,51 @@ export function createCommitsRouter(deps: ReviewRouterDeps): Router {
       const result = await getCommits(deps.store, deps.ghClient);
       if (isOk(result)) {
         response.json(result.value);
+      } else {
+        response.status(502).json({ error: result.error.message });
+      }
+    }),
+  );
+
+  return router;
+}
+
+// Mounted at /api/threads: serves the PR's review-comment threads and their resolved state, and
+// accepts resolve/unresolve mutations by thread id. It shares the review deps so it reads the
+// same PR number the review routes write against.
+export function createThreadsRouter(deps: ReviewRouterDeps): Router {
+  const router = Router();
+
+  router.get(
+    '/',
+    wrap(async (_request, response) => {
+      const result = await getThreads(deps.store, deps.ghClient);
+      if (isOk(result)) {
+        response.json(result.value);
+      } else {
+        response.status(502).json({ error: result.error.message });
+      }
+    }),
+  );
+
+  router.post(
+    '/:id/resolve',
+    wrap(async (request, response) => {
+      const result = await deps.ghClient.resolveReviewThread(request.params.id);
+      if (isOk(result)) {
+        response.json({ ok: true });
+      } else {
+        response.status(502).json({ error: result.error.message });
+      }
+    }),
+  );
+
+  router.post(
+    '/:id/unresolve',
+    wrap(async (request, response) => {
+      const result = await deps.ghClient.unresolveReviewThread(request.params.id);
+      if (isOk(result)) {
+        response.json({ ok: true });
       } else {
         response.status(502).json({ error: result.error.message });
       }

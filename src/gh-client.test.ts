@@ -447,6 +447,134 @@ describe('createGhClient', () => {
     }
   });
 
+  it('listReviewThreads passes owner/name/number placeholders and normalizes each thread', async () => {
+    const { execute, calls } = recordingExecutor([
+      ok(
+        JSON.stringify({
+          data: {
+            repository: {
+              pullRequest: {
+                reviewThreads: {
+                  nodes: [
+                    {
+                      id: 'PRRT_resolved',
+                      isResolved: true,
+                      isOutdated: false,
+                      comments: {
+                        nodes: [
+                          {
+                            databaseId: 11,
+                            body: 'first',
+                            createdAt: '2026-06-01T00:00:00Z',
+                            path: 'a.ts',
+                            line: 12,
+                            originalLine: 9,
+                            author: { login: 'octocat' },
+                          },
+                          {
+                            databaseId: 12,
+                            body: 'reply',
+                            createdAt: '2026-06-01T01:00:00Z',
+                            path: 'a.ts',
+                            line: 12,
+                            originalLine: 9,
+                            author: null,
+                          },
+                        ],
+                      },
+                    },
+                    {
+                      id: 'PRRT_outdated',
+                      isResolved: false,
+                      isOutdated: true,
+                      comments: {
+                        nodes: [
+                          {
+                            databaseId: 20,
+                            body: 'outdated note',
+                            createdAt: '2026-06-02T00:00:00Z',
+                            path: 'b.ts',
+                            line: null,
+                            originalLine: 4,
+                            author: { login: 'reviewer' },
+                          },
+                        ],
+                      },
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        }),
+      ),
+    ]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    const result = await client.listReviewThreads(42);
+
+    expect(calls[0].args).toEqual([
+      'api',
+      'graphql',
+      '-F',
+      'owner={owner}',
+      '-F',
+      'name={repo}',
+      '-F',
+      'number=42',
+      '-f',
+      expect.stringContaining('reviewThreads(first: 100)'),
+    ]);
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value[0]).toEqual({
+        id: 'PRRT_resolved',
+        isResolved: true,
+        path: 'a.ts',
+        line: 12,
+        comments: [
+          { id: 11, author: 'octocat', body: 'first', createdAt: '2026-06-01T00:00:00Z' },
+          // The reply defaults a missing author to an empty string.
+          { id: 12, author: '', body: 'reply', createdAt: '2026-06-01T01:00:00Z' },
+        ],
+      });
+      // Falls back to the first comment's originalLine when its current line is null.
+      expect(result.value[1]).toMatchObject({ id: 'PRRT_outdated', isResolved: false, line: 4 });
+    }
+  });
+
+  it('resolveReviewThread sends the resolve mutation with the thread id variable', async () => {
+    const { execute, calls } = recordingExecutor([ok('')]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    await client.resolveReviewThread('PRRT_abc');
+
+    expect(calls[0].args).toEqual([
+      'api',
+      'graphql',
+      '-F',
+      'threadId=PRRT_abc',
+      '-f',
+      expect.stringContaining('resolveReviewThread'),
+    ]);
+  });
+
+  it('unresolveReviewThread sends the unresolve mutation with the thread id variable', async () => {
+    const { execute, calls } = recordingExecutor([ok('')]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    await client.unresolveReviewThread('PRRT_xyz');
+
+    expect(calls[0].args).toEqual([
+      'api',
+      'graphql',
+      '-F',
+      'threadId=PRRT_xyz',
+      '-f',
+      expect.stringContaining('unresolveReviewThread'),
+    ]);
+  });
+
   it('getHeadSha returns the trimmed head sha', async () => {
     const { execute, calls } = recordingExecutor([ok('deadbeef\n')]);
     const client = createGhClient(execute, noDelayRetry);

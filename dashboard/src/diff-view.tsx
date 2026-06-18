@@ -3,7 +3,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { reviewApi } from './review-api';
 import { formatCommentTimestamp } from './format';
-import type { ExistingReviewComment, PendingComment } from './types';
+import type { PendingComment, ReviewThread } from './types';
 
 // Above this many diff lines, switch from rendering every row to a measured, windowed list
 // so very large file diffs stay responsive. Smaller diffs render exactly as before — the
@@ -71,8 +71,9 @@ interface DiffViewProps {
   patch: string;
   path: string;
   comments: PendingComment[];
-  existingComments: ExistingReviewComment[];
+  threads: ReviewThread[];
   onChange: () => void;
+  onThreadsChange: () => void;
   setStatus: (status: string | null) => void;
 }
 
@@ -88,18 +89,95 @@ function CommentThread({ comment }: { comment: PendingComment }) {
   );
 }
 
-// A comment already posted to the PR by any reviewer: slate/gray, read-only, with author and
-// date so it never reads like one of your own pending amber comments.
-function ExistingThread({ comment }: { comment: ExistingReviewComment }) {
+// A review thread already posted to the PR by any reviewer: slate/gray, read-only comments, with
+// author and date so it never reads like one of your own pending amber comments. A resolved
+// thread is muted and collapses to its header until expanded; the Resolve/Unresolve button
+// posts the GraphQL mutation and refreshes the thread list.
+function ExistingReviewThread({
+  thread,
+  onThreadsChange,
+  setStatus,
+}: {
+  thread: ReviewThread;
+  onThreadsChange: () => void;
+  setStatus: (status: string | null) => void;
+}) {
+  // Resolved threads start collapsed (just the header); expand to read them on demand.
+  const [expanded, setExpanded] = useState(!thread.isResolved);
+  const [busy, setBusy] = useState(false);
+
+  const toggleResolved = async () => {
+    setBusy(true);
+    try {
+      if (thread.isResolved) {
+        await reviewApi.unresolveThread(thread.id);
+      } else {
+        await reviewApi.resolveThread(thread.id);
+      }
+      setStatus(null);
+      onThreadsChange();
+    } catch (error) {
+      setStatus(`${thread.isResolved ? 'Unresolve' : 'Resolve'} thread failed: ${(error as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const accent = thread.isResolved
+    ? 'border-slate-200 bg-slate-50/60 dark:border-slate-700 dark:bg-slate-800/30'
+    : 'border-slate-300 bg-slate-50 dark:border-slate-600 dark:bg-slate-800/60';
+
   return (
-    <div className="border-l-4 border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-700 dark:border-slate-600 dark:bg-slate-800/60 dark:text-slate-200">
-      <div className="mb-0.5 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-        <span className="font-medium text-slate-600 dark:text-slate-300">{comment.author}</span>
-        <span>·</span>
-        <span>{formatCommentTimestamp(comment.createdAt)}</span>
-        {comment.inReplyToId !== null ? <span className="italic">reply</span> : null}
+    <div className={`border-l-4 px-3 py-2 text-sm ${accent}`}>
+      <div className="mb-1 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
+          {thread.isResolved ? (
+            <span className="rounded border border-green-300 bg-green-50 px-1.5 py-0.5 text-xs font-medium text-green-700 dark:border-green-800 dark:bg-green-950 dark:text-green-300">
+              Resolved
+            </span>
+          ) : (
+            <span className="rounded border border-slate-300 bg-white px-1.5 py-0.5 text-xs font-medium text-slate-500 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-400">
+              Unresolved
+            </span>
+          )}
+          <span className="text-xs text-slate-500 dark:text-slate-400">
+            {thread.comments.length} comment{thread.comments.length === 1 ? '' : 's'}
+          </span>
+          {thread.isResolved ? (
+            <button
+              type="button"
+              onClick={() => setExpanded((open) => !open)}
+              className="text-xs text-slate-500 hover:underline dark:text-slate-400"
+            >
+              {expanded ? 'Hide' : 'Show'}
+            </button>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          onClick={toggleResolved}
+          disabled={busy}
+          className="rounded border border-slate-300 px-2 py-0.5 text-xs font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-600 dark:text-slate-300 dark:hover:bg-slate-800"
+        >
+          {thread.isResolved ? 'Unresolve' : 'Resolve'}
+        </button>
       </div>
-      <div className="whitespace-pre-wrap break-words font-sans">{comment.body}</div>
+      {expanded
+        ? thread.comments.map((comment, index) => (
+            <div
+              key={comment.id ?? index}
+              className={`text-slate-700 dark:text-slate-200 ${index > 0 ? 'mt-2 border-t border-slate-200 pt-2 dark:border-slate-700' : ''}`}
+            >
+              <div className="mb-0.5 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+                <span className="font-medium text-slate-600 dark:text-slate-300">{comment.author}</span>
+                <span>·</span>
+                <span>{formatCommentTimestamp(comment.createdAt)}</span>
+                {index > 0 ? <span className="italic">reply</span> : null}
+              </div>
+              <div className="whitespace-pre-wrap break-words font-sans">{comment.body}</div>
+            </div>
+          ))
+        : null}
     </div>
   );
 }
@@ -108,8 +186,9 @@ export function DiffView({
   patch,
   path,
   comments,
-  existingComments,
+  threads,
   onChange,
+  onThreadsChange,
   setStatus,
 }: DiffViewProps) {
   const lines = patch.split('\n');
@@ -124,10 +203,8 @@ export function DiffView({
 
   const lineComments = comments.filter((comment) => comment.scope === 'line');
   const fileComments = comments.filter((comment) => comment.scope === 'file');
-  // Anchor existing comments to the new-file (RIGHT) line, the same gutter the inline UI uses.
-  const existingLineComments = existingComments.filter(
-    (comment) => comment.side === 'RIGHT' && comment.line !== null,
-  );
+  // Anchor existing threads to their new-file line, the same gutter the inline comment UI uses.
+  const lineThreads = threads.filter((thread) => thread.line !== null);
 
   // Press the "+" on a line and drag up or down to grow the selection; release to open the box.
   // Holding shift extends the existing selection instead of starting a new one.
@@ -276,10 +353,15 @@ export function DiffView({
           <span className="flex-1 whitespace-pre-wrap break-words px-3">{text || ' '}</span>
         </div>
 
-        {existingLineComments
-          .filter((comment) => comment.line === newLine)
-          .map((comment) => (
-            <ExistingThread key={comment.id} comment={comment} />
+        {lineThreads
+          .filter((thread) => thread.line === newLine)
+          .map((thread) => (
+            <ExistingReviewThread
+              key={thread.id}
+              thread={thread}
+              onThreadsChange={onThreadsChange}
+              setStatus={setStatus}
+            />
           ))}
 
         {lineComments

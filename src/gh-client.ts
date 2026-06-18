@@ -10,6 +10,7 @@ import type {
   ExistingReviewComment,
   NodeStatus,
   PrMeta,
+  ReviewThread,
 } from './types.js';
 
 export interface GhError {
@@ -80,6 +81,11 @@ export interface GhClient {
   listConversationComments(
     prNumber: number,
   ): Promise<Result<ExistingConversationComment[], GhError>>;
+  listReviewThreads(
+    prNumber: number,
+  ): Promise<Result<ReviewThread[], GhError>>;
+  resolveReviewThread(threadId: string): Promise<Result<string, GhError>>;
+  unresolveReviewThread(threadId: string): Promise<Result<string, GhError>>;
   listChecks(prNumber: number): Promise<Result<ChecksSummary, GhError>>;
   listCommits(prNumber: number): Promise<Result<CommitInfo[], GhError>>;
 }
@@ -88,6 +94,46 @@ const DEFAULT_RETRY_OPTIONS: RetryOptions = { attempts: 3, delayMs: 300 };
 
 const PR_METADATA_FIELDS =
   'number,title,body,author,baseRefName,headRefName,url';
+
+// Review threads are a GraphQL-only concept (the REST comments list has no thread grouping and
+// no resolved state), so this query reads the thread structure plus each thread's comments.
+const REVIEW_THREADS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      reviewThreads(first: 100) {
+        nodes {
+          id
+          isResolved
+          isOutdated
+          comments(first: 100) {
+            nodes {
+              databaseId
+              body
+              createdAt
+              path
+              line
+              originalLine
+              author { login }
+            }
+          }
+        }
+      }
+    }
+  }
+}`;
+
+// Resolving/unresolving a thread is a GraphQL-only mutation keyed by the thread's node id.
+const RESOLVE_THREAD_MUTATION = `mutation($threadId: ID!) {
+  resolveReviewThread(input: { threadId: $threadId }) {
+    thread { id isResolved }
+  }
+}`;
+
+const UNRESOLVE_THREAD_MUTATION = `mutation($threadId: ID!) {
+  unresolveReviewThread(input: { threadId: $threadId }) {
+    thread { id isResolved }
+  }
+}`;
 
 export function createGhClient(
   execute: CommandExecutor,
@@ -232,6 +278,48 @@ export function createGhClient(
       return parseConversationComments(raw.value);
     },
 
+    // Review threads (the resolved/unresolved grouping) only exist in GraphQL. The {owner}/{repo}
+    // placeholders are populated by gh from the current repository, the same context the REST
+    // calls above rely on, so this method needs nothing beyond the PR number.
+    async listReviewThreads(prNumber) {
+      const raw = await run([
+        'api',
+        'graphql',
+        '-F',
+        'owner={owner}',
+        '-F',
+        'name={repo}',
+        '-F',
+        `number=${prNumber}`,
+        '-f',
+        `query=${REVIEW_THREADS_QUERY}`,
+      ]);
+      if (!isOk(raw)) return raw;
+      return parseReviewThreads(raw.value);
+    },
+
+    resolveReviewThread(threadId) {
+      return run([
+        'api',
+        'graphql',
+        '-F',
+        `threadId=${threadId}`,
+        '-f',
+        `query=${RESOLVE_THREAD_MUTATION}`,
+      ]);
+    },
+
+    unresolveReviewThread(threadId) {
+      return run([
+        'api',
+        'graphql',
+        '-F',
+        `threadId=${threadId}`,
+        '-f',
+        `query=${UNRESOLVE_THREAD_MUTATION}`,
+      ]);
+    },
+
     // Checks live in two GitHub surfaces: the check-runs API (GitHub Actions, App checks)
     // and the legacy combined-status API (commit statuses). Both hang off the head commit,
     // so resolve the SHA first, then merge the two responses into one normalized summary.
@@ -356,6 +444,62 @@ function parseConversationComments(
       author: comment.user?.login ?? '',
       createdAt: comment.created_at,
     })),
+  );
+}
+
+interface RawReviewThreadComment {
+  databaseId: number | null;
+  body: string;
+  createdAt: string;
+  path: string;
+  line: number | null;
+  originalLine: number | null;
+  author: { login: string } | null;
+}
+
+interface RawReviewThread {
+  id: string;
+  isResolved: boolean;
+  isOutdated: boolean;
+  comments: { nodes: RawReviewThreadComment[] };
+}
+
+interface RawReviewThreadsResponse {
+  data: {
+    repository: {
+      pullRequest: {
+        reviewThreads: { nodes: RawReviewThread[] };
+      } | null;
+    } | null;
+  };
+}
+
+function parseReviewThreads(raw: string): Result<ReviewThread[], GhError> {
+  const parsed = parseJson<RawReviewThreadsResponse>(raw);
+  if (!isOk(parsed)) return parsed;
+  const nodes = parsed.value.data?.repository?.pullRequest?.reviewThreads?.nodes;
+  if (!nodes) {
+    return err({ message: 'GraphQL response did not contain review threads.' });
+  }
+  return ok(
+    nodes.map((thread) => {
+      const firstComment = thread.comments.nodes[0];
+      return {
+        id: thread.id,
+        isResolved: thread.isResolved,
+        // Every comment in a thread shares the same path; take it from the first one.
+        path: firstComment?.path ?? '',
+        // The thread anchors to the first comment's current-diff line, falling back to the
+        // original line when the line is outdated against the latest push.
+        line: firstComment ? firstComment.line ?? firstComment.originalLine : null,
+        comments: thread.comments.nodes.map((comment) => ({
+          id: comment.databaseId,
+          author: comment.author?.login ?? '',
+          body: comment.body,
+          createdAt: comment.createdAt,
+        })),
+      };
+    }),
   );
 }
 
