@@ -164,6 +164,28 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       ]);
       if (!isOk(raw)) return raw;
       return parseConversationComments(raw.value);
+    },
+    // Checks live in two GitHub surfaces: the check-runs API (GitHub Actions, App checks)
+    // and the legacy combined-status API (commit statuses). Both hang off the head commit,
+    // so resolve the SHA first, then merge the two responses into one normalized summary.
+    // gh api always exits 0 on success, unlike `gh pr checks` which exits non-zero on
+    // pending/failing checks and would surface as a GhError.
+    async listChecks(prNumber) {
+      const headSha = await this.getHeadSha(prNumber);
+      if (!isOk(headSha)) return headSha;
+      const sha = headSha.value;
+      const checkRunsRaw = await run([
+        "api",
+        `repos/{owner}/{repo}/commits/${sha}/check-runs`,
+        "--paginate"
+      ]);
+      if (!isOk(checkRunsRaw)) return checkRunsRaw;
+      const combinedStatusRaw = await run([
+        "api",
+        `repos/{owner}/{repo}/commits/${sha}/status`
+      ]);
+      if (!isOk(combinedStatusRaw)) return combinedStatusRaw;
+      return parseChecks(checkRunsRaw.value, combinedStatusRaw.value);
     }
   };
 }
@@ -212,6 +234,42 @@ function parseConversationComments(raw) {
       createdAt: comment.created_at
     }))
   );
+}
+var FAILURE_CONCLUSIONS = /* @__PURE__ */ new Set([
+  "failure",
+  "cancelled",
+  "timed_out",
+  "action_required"
+]);
+function parseChecks(checkRunsRaw, combinedStatusRaw) {
+  const checkRunsParsed = parseJson(checkRunsRaw);
+  if (!isOk(checkRunsParsed)) return checkRunsParsed;
+  const combinedParsed = parseJson(combinedStatusRaw);
+  if (!isOk(combinedParsed)) return combinedParsed;
+  const checks = [
+    ...(checkRunsParsed.value.check_runs ?? []).map((run) => ({
+      name: run.name,
+      status: run.status,
+      conclusion: run.conclusion ?? "",
+      url: run.html_url ?? run.details_url ?? null
+    })),
+    ...(combinedParsed.value.statuses ?? []).map((status) => ({
+      name: status.context,
+      // Legacy statuses have no lifecycle field; map their state onto status/conclusion so the
+      // rollup treats a pending status as in-flight and a non-pending one as completed.
+      status: status.state === "pending" ? "in_progress" : "completed",
+      conclusion: status.state === "pending" ? "" : status.state,
+      url: status.target_url ?? null
+    }))
+  ];
+  return ok({ state: computeOverallState(checks, combinedParsed.value.state), checks });
+}
+function computeOverallState(checks, combinedState) {
+  const anyPending = combinedState === "pending" || checks.some((check) => check.status === "queued" || check.status === "in_progress");
+  if (anyPending) return "pending";
+  const anyFailure = combinedState === "failure" || checks.some((check) => FAILURE_CONCLUSIONS.has(check.conclusion));
+  if (anyFailure) return "failure";
+  return "success";
 }
 function parseChangedFiles(raw) {
   const parsed = parseJson(raw);
