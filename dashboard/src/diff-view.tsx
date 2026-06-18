@@ -1,8 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import { useVirtualizer } from '@tanstack/react-virtual';
 import { reviewApi } from './review-api';
 import { formatCommentTimestamp } from './format';
 import type { ExistingReviewComment, PendingComment } from './types';
+
+// Above this many diff lines, switch from rendering every row to a measured, windowed list
+// so very large file diffs stay responsive. Smaller diffs render exactly as before — the
+// common case keeps the original, simpler code path with zero risk of regression.
+const VIRTUALIZE_THRESHOLD = 200;
+// A plain diff row is ~24px tall (leading-6); this only seeds the virtualizer before each
+// row is actually measured, so the estimate just needs to be close, not exact.
+const ESTIMATED_ROW_HEIGHT = 24;
 
 interface DiffLineMeta {
   oldLine: number | null;
@@ -227,6 +236,93 @@ export function DiffView({
     }
   };
 
+  // One row of the diff: the gutters + code, then any inline threads / the active editor
+  // stacked underneath it. Shared verbatim by the plain and the virtualized list so a small
+  // diff and a large diff render byte-for-byte identical markup for the same line.
+  const renderRow = (lineIndex: number): ReactNode => {
+    const text = lines[lineIndex];
+    const { oldLine, newLine } = lineMeta[lineIndex] ?? { oldLine: null, newLine: null };
+    const commentable = newLine !== null;
+    return (
+      <>
+        <div
+          data-newline={newLine ?? ''}
+          className={`flex ${lineBackground(text)} ${rangeBorders(newLine)}`}
+        >
+          <span className="w-6 shrink-0 select-none border-r border-slate-100 text-center text-slate-400 dark:border-slate-800">
+            {commentable ? (
+              <button
+                type="button"
+                title="Click to comment, or drag to select multiple lines"
+                onPointerDown={(event) => beginDrag(newLine, event)}
+                className="cursor-pointer font-semibold text-slate-400 opacity-0 group-hover:opacity-100 hover:text-blue-600 dark:hover:text-blue-400"
+              >
+                +
+              </button>
+            ) : null}
+          </span>
+          <span className="w-12 shrink-0 select-none border-r border-slate-100 px-2 text-right text-slate-400 dark:border-slate-800 dark:text-slate-500">
+            {oldLine ?? ''}
+          </span>
+          <span
+            onPointerDown={commentable ? (event) => beginDrag(newLine, event) : undefined}
+            title={commentable ? 'Click to comment, or drag to select multiple lines' : undefined}
+            className={`w-12 shrink-0 select-none border-r border-slate-100 px-2 text-right text-slate-400 dark:border-slate-800 dark:text-slate-500 ${
+              commentable ? 'cursor-pointer hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-900/40 dark:hover:text-blue-300' : ''
+            }`}
+          >
+            {newLine ?? ''}
+          </span>
+          <span className="flex-1 whitespace-pre-wrap break-words px-3">{text || ' '}</span>
+        </div>
+
+        {existingLineComments
+          .filter((comment) => comment.line === newLine)
+          .map((comment) => (
+            <ExistingThread key={comment.id} comment={comment} />
+          ))}
+
+        {lineComments
+          .filter((comment) => comment.line === newLine)
+          .map((comment) => (
+            <CommentThread key={comment.id} comment={comment} />
+          ))}
+
+        {target && target.line === newLine ? (
+          <div className="flex flex-col gap-2 bg-slate-50 px-3 py-2 dark:bg-slate-800/60">
+            <textarea
+              value={body}
+              onChange={(event) => setBody(event.target.value)}
+              placeholder={
+                target.startLine !== undefined
+                  ? `Comment on ${path}:${target.startLine}-${target.line}`
+                  : `Comment on ${path}:${target.line}`
+              }
+              className="h-20 rounded border border-slate-300 p-2 font-sans text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+            />
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={submitLineComment}
+                disabled={!body.trim()}
+                className="rounded bg-slate-800 px-3 py-1.5 text-sm text-white disabled:opacity-40 dark:bg-slate-700"
+              >
+                Add comment
+              </button>
+              <button
+                type="button"
+                onClick={() => setTarget(null)}
+                className="rounded px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : null}
+      </>
+    );
+  };
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex items-center justify-between">
@@ -271,94 +367,83 @@ export function DiffView({
         </div>
       ))}
 
-      <div
-        onPointerMove={trackDrag}
-        className={`overflow-auto rounded-md border border-slate-200 font-mono text-[13px] leading-6 dark:border-slate-700 ${
-          drag ? 'select-none' : ''
-        }`}
-      >
-        {lines.map((text, lineIndex) => {
-          const { oldLine, newLine } = lineMeta[lineIndex] ?? { oldLine: null, newLine: null };
-          const commentable = newLine !== null;
-          return (
+      {lines.length > VIRTUALIZE_THRESHOLD ? (
+        <VirtualizedDiff
+          rowCount={lines.length}
+          renderRow={renderRow}
+          trackDrag={trackDrag}
+          dragging={drag !== null}
+        />
+      ) : (
+        <div
+          onPointerMove={trackDrag}
+          className={`overflow-auto rounded-md border border-slate-200 font-mono text-[13px] leading-6 dark:border-slate-700 ${
+            drag ? 'select-none' : ''
+          }`}
+        >
+          {lines.map((_, lineIndex) => (
             <div key={lineIndex} className="group">
-              <div
-                data-newline={newLine ?? ''}
-                className={`flex ${lineBackground(text)} ${rangeBorders(newLine)}`}
-              >
-                <span className="w-6 shrink-0 select-none border-r border-slate-100 text-center text-slate-400 dark:border-slate-800">
-                  {commentable ? (
-                    <button
-                      type="button"
-                      title="Click to comment, or drag to select multiple lines"
-                      onPointerDown={(event) => beginDrag(newLine, event)}
-                      className="cursor-pointer font-semibold text-slate-400 opacity-0 group-hover:opacity-100 hover:text-blue-600 dark:hover:text-blue-400"
-                    >
-                      +
-                    </button>
-                  ) : null}
-                </span>
-                <span className="w-12 shrink-0 select-none border-r border-slate-100 px-2 text-right text-slate-400 dark:border-slate-800 dark:text-slate-500">
-                  {oldLine ?? ''}
-                </span>
-                <span
-                  onPointerDown={commentable ? (event) => beginDrag(newLine, event) : undefined}
-                  title={commentable ? 'Click to comment, or drag to select multiple lines' : undefined}
-                  className={`w-12 shrink-0 select-none border-r border-slate-100 px-2 text-right text-slate-400 dark:border-slate-800 dark:text-slate-500 ${
-                    commentable ? 'cursor-pointer hover:bg-blue-100 hover:text-blue-700 dark:hover:bg-blue-900/40 dark:hover:text-blue-300' : ''
-                  }`}
-                >
-                  {newLine ?? ''}
-                </span>
-                <span className="flex-1 whitespace-pre-wrap break-words px-3">{text || ' '}</span>
-              </div>
-
-              {existingLineComments
-                .filter((comment) => comment.line === newLine)
-                .map((comment) => (
-                  <ExistingThread key={comment.id} comment={comment} />
-                ))}
-
-              {lineComments
-                .filter((comment) => comment.line === newLine)
-                .map((comment) => (
-                  <CommentThread key={comment.id} comment={comment} />
-                ))}
-
-              {target && target.line === newLine ? (
-                <div className="flex flex-col gap-2 bg-slate-50 px-3 py-2 dark:bg-slate-800/60">
-                  <textarea
-                    value={body}
-                    onChange={(event) => setBody(event.target.value)}
-                    placeholder={
-                      target.startLine !== undefined
-                        ? `Comment on ${path}:${target.startLine}-${target.line}`
-                        : `Comment on ${path}:${target.line}`
-                    }
-                    className="h-20 rounded border border-slate-300 p-2 font-sans text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-                  />
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={submitLineComment}
-                      disabled={!body.trim()}
-                      className="rounded bg-slate-800 px-3 py-1.5 text-sm text-white disabled:opacity-40 dark:bg-slate-700"
-                    >
-                      Add comment
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setTarget(null)}
-                      className="rounded px-3 py-1.5 text-sm text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              ) : null}
+              {renderRow(lineIndex)}
             </div>
-          );
-        })}
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Windowed diff body for large files: only the rows in/near the viewport are mounted, so the
+// row count no longer drives render cost. Heights are MEASURED (rows carrying comment threads
+// or the active editor are much taller than a plain line), so the virtualizer sizes each row
+// from its real DOM, not a fixed guess.
+function VirtualizedDiff({
+  rowCount,
+  renderRow,
+  trackDrag,
+  dragging,
+}: {
+  rowCount: number;
+  renderRow: (lineIndex: number) => ReactNode;
+  trackDrag: (event: ReactPointerEvent) => void;
+  dragging: boolean;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const virtualizer = useVirtualizer({
+    count: rowCount,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => ESTIMATED_ROW_HEIGHT,
+    // Keep extra rows mounted above/below the viewport. The drag tracker reads the row under
+    // the cursor, so a generous overscan means rows are already in the DOM as the user
+    // scrolls a selection past the visible edge, keeping the range extending smoothly.
+    overscan: 24,
+  });
+
+  return (
+    <div
+      ref={scrollRef}
+      onPointerMove={trackDrag}
+      className={`max-h-[70vh] overflow-auto rounded-md border border-slate-200 font-mono text-[13px] leading-6 dark:border-slate-700 ${
+        dragging ? 'select-none' : ''
+      }`}
+    >
+      <div style={{ height: virtualizer.getTotalSize(), position: 'relative', width: '100%' }}>
+        {virtualizer.getVirtualItems().map((virtualRow) => (
+          <div
+            key={virtualRow.key}
+            data-index={virtualRow.index}
+            ref={virtualizer.measureElement}
+            className="group"
+            style={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              width: '100%',
+              transform: `translateY(${virtualRow.start}px)`,
+            }}
+          >
+            {renderRow(virtualRow.index)}
+          </div>
+        ))}
       </div>
     </div>
   );
