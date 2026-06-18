@@ -35,6 +35,7 @@ describe('createGhClient', () => {
           author: { login: 'octocat' },
           baseRefName: 'main',
           headRefName: 'feature/discount',
+          headRefOid: 'deadbeefsha',
           url: 'https://github.com/acme/shop/pull/42',
         }),
       ),
@@ -48,7 +49,7 @@ describe('createGhClient', () => {
       'view',
       '42',
       '--json',
-      'number,title,body,author,baseRefName,headRefName,url',
+      'number,title,body,author,baseRefName,headRefName,headRefOid,url',
     ]);
     expect(isOk(result)).toBe(true);
     if (isOk(result)) {
@@ -57,6 +58,7 @@ describe('createGhClient', () => {
       expect(result.value.number).toBe(42);
       expect(result.value.author).toBe('octocat');
       expect(result.value.baseRef).toBe('main');
+      expect(result.value.headSha).toBe('deadbeefsha');
     }
   });
 
@@ -283,28 +285,43 @@ describe('createGhClient', () => {
     }
   });
 
-  it('listChecks resolves the head sha then queries check-runs and combined status, merging both', async () => {
+  it('listChecks slurps paginated check-runs and combined status, flattening every page', async () => {
     const { execute, calls } = recordingExecutor([
       ok('feedface\n'),
+      // --slurp wraps pages in an array; both pages of check-runs must be flattened into one list.
       ok(
-        JSON.stringify({
-          check_runs: [
-            {
-              name: 'unit-tests',
-              status: 'completed',
-              conclusion: 'success',
-              html_url: 'https://github.com/acme/shop/runs/1',
-            },
-          ],
-        }),
+        JSON.stringify([
+          {
+            check_runs: [
+              {
+                name: 'unit-tests',
+                status: 'completed',
+                conclusion: 'success',
+                html_url: 'https://github.com/acme/shop/runs/1',
+              },
+            ],
+          },
+          {
+            check_runs: [
+              {
+                name: 'integration',
+                status: 'completed',
+                conclusion: 'success',
+                html_url: 'https://github.com/acme/shop/runs/2',
+              },
+            ],
+          },
+        ]),
       ),
       ok(
-        JSON.stringify({
-          state: 'success',
-          statuses: [
-            { context: 'ci/legacy', state: 'success', target_url: 'https://ci.example/1' },
-          ],
-        }),
+        JSON.stringify([
+          {
+            state: 'success',
+            statuses: [
+              { context: 'ci/legacy', state: 'success', target_url: 'https://ci.example/1' },
+            ],
+          },
+        ]),
       ),
     ]);
     const client = createGhClient(execute, noDelayRetry);
@@ -316,8 +333,14 @@ describe('createGhClient', () => {
       'api',
       'repos/{owner}/{repo}/commits/feedface/check-runs',
       '--paginate',
+      '--slurp',
     ]);
-    expect(calls[2].args).toEqual(['api', 'repos/{owner}/{repo}/commits/feedface/status']);
+    expect(calls[2].args).toEqual([
+      'api',
+      'repos/{owner}/{repo}/commits/feedface/status',
+      '--paginate',
+      '--slurp',
+    ]);
     expect(isOk(result)).toBe(true);
     if (isOk(result)) {
       expect(result.value.state).toBe('success');
@@ -327,6 +350,12 @@ describe('createGhClient', () => {
           status: 'completed',
           conclusion: 'success',
           url: 'https://github.com/acme/shop/runs/1',
+        },
+        {
+          name: 'integration',
+          status: 'completed',
+          conclusion: 'success',
+          url: 'https://github.com/acme/shop/runs/2',
         },
         {
           name: 'ci/legacy',
@@ -342,11 +371,15 @@ describe('createGhClient', () => {
     const { execute } = recordingExecutor([
       ok('sha\n'),
       ok(
-        JSON.stringify({
-          check_runs: [{ name: 'build', status: 'in_progress', conclusion: null, html_url: null }],
-        }),
+        JSON.stringify([
+          {
+            check_runs: [
+              { name: 'build', status: 'in_progress', conclusion: null, html_url: null },
+            ],
+          },
+        ]),
       ),
-      ok(JSON.stringify({ state: 'success', statuses: [] })),
+      ok(JSON.stringify([{ state: 'success', statuses: [] }])),
     ]);
     const client = createGhClient(execute, noDelayRetry);
 
@@ -360,14 +393,16 @@ describe('createGhClient', () => {
     const { execute } = recordingExecutor([
       ok('sha\n'),
       ok(
-        JSON.stringify({
-          check_runs: [
-            { name: 'lint', status: 'completed', conclusion: 'success', html_url: null },
-            { name: 'e2e', status: 'completed', conclusion: 'timed_out', html_url: null },
-          ],
-        }),
+        JSON.stringify([
+          {
+            check_runs: [
+              { name: 'lint', status: 'completed', conclusion: 'success', html_url: null },
+              { name: 'e2e', status: 'completed', conclusion: 'timed_out', html_url: null },
+            ],
+          },
+        ]),
       ),
-      ok(JSON.stringify({ state: 'success', statuses: [] })),
+      ok(JSON.stringify([{ state: 'success', statuses: [] }])),
     ]);
     const client = createGhClient(execute, noDelayRetry);
 
@@ -380,12 +415,14 @@ describe('createGhClient', () => {
   it('listChecks reports failure from the legacy combined status even with no check-runs', async () => {
     const { execute } = recordingExecutor([
       ok('sha\n'),
-      ok(JSON.stringify({ check_runs: [] })),
+      ok(JSON.stringify([{ check_runs: [] }])),
       ok(
-        JSON.stringify({
-          state: 'failure',
-          statuses: [{ context: 'ci/legacy', state: 'failure', target_url: null }],
-        }),
+        JSON.stringify([
+          {
+            state: 'failure',
+            statuses: [{ context: 'ci/legacy', state: 'failure', target_url: null }],
+          },
+        ]),
       ),
     ]);
     const client = createGhClient(execute, noDelayRetry);

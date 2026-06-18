@@ -19,6 +19,7 @@ const meta: PrMeta = {
   author: 'octocat',
   baseRef: 'main',
   headRef: 'feature/discount',
+  headSha: 'shadiscount',
 };
 
 function makeRawPr(files: RawPrFile[]): RawPr {

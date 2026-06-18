@@ -93,7 +93,7 @@ export interface GhClient {
 const DEFAULT_RETRY_OPTIONS: RetryOptions = { attempts: 3, delayMs: 300 };
 
 const PR_METADATA_FIELDS =
-  'number,title,body,author,baseRefName,headRefName,url';
+  'number,title,body,author,baseRefName,headRefName,headRefOid,url';
 
 // Review threads are a GraphQL-only concept (the REST comments list has no thread grouping and
 // no resolved state), so this query reads the thread structure plus each thread's comments.
@@ -336,16 +336,23 @@ export function createGhClient(
       if (!isOk(headSha)) return headSha;
       const sha = headSha.value;
 
+      // Both endpoints are object-shaped (`{ check_runs }` / `{ state, statuses }`), so plain
+      // --paginate would concatenate page objects into invalid JSON. --slurp wraps the pages in
+      // a single JSON array, which parseChecks flattens — covering commits with many checks or
+      // many legacy statuses without dropping pages.
       const checkRunsRaw = await run([
         'api',
         `repos/{owner}/{repo}/commits/${sha}/check-runs`,
         '--paginate',
+        '--slurp',
       ]);
       if (!isOk(checkRunsRaw)) return checkRunsRaw;
 
       const combinedStatusRaw = await run([
         'api',
         `repos/{owner}/{repo}/commits/${sha}/status`,
+        '--paginate',
+        '--slurp',
       ]);
       if (!isOk(combinedStatusRaw)) return combinedStatusRaw;
 
@@ -371,6 +378,7 @@ interface RawPrMetadata {
   author: { login: string };
   baseRefName: string;
   headRefName: string;
+  headRefOid: string;
   url: string;
 }
 
@@ -397,6 +405,7 @@ function parsePrMetadata(raw: string): Result<PrMeta, GhError> {
     author: parsed.value.author?.login ?? '',
     baseRef: parsed.value.baseRefName,
     headRef: parsed.value.headRefName,
+    headSha: parsed.value.headRefOid ?? '',
   });
 }
 
@@ -544,13 +553,14 @@ interface RawCheckRun {
   details_url?: string | null;
 }
 
-interface RawCheckRunsResponse {
-  check_runs: RawCheckRun[];
+// One page of each --slurp-ed response. gh wraps all fetched pages in a JSON array.
+interface RawCheckRunsPage {
+  check_runs?: RawCheckRun[];
 }
 
-interface RawCombinedStatus {
+interface RawCombinedStatusPage {
   state: string;
-  statuses: {
+  statuses?: {
     context: string;
     state: string;
     target_url: string | null;
@@ -564,23 +574,30 @@ const FAILURE_CONCLUSIONS = new Set([
   'action_required',
 ]);
 
+// Each argument is a --slurp-ed JSON array of page objects. Flatten check-runs and statuses
+// across all pages; the combined `state` rollup is repeated on every page, so read it from the
+// first (defaulting to success when there are no status pages at all).
 function parseChecks(
   checkRunsRaw: string,
   combinedStatusRaw: string,
 ): Result<ChecksSummary, GhError> {
-  const checkRunsParsed = parseJson<RawCheckRunsResponse>(checkRunsRaw);
-  if (!isOk(checkRunsParsed)) return checkRunsParsed;
-  const combinedParsed = parseJson<RawCombinedStatus>(combinedStatusRaw);
-  if (!isOk(combinedParsed)) return combinedParsed;
+  const checkRunsPages = parseJson<RawCheckRunsPage[]>(checkRunsRaw);
+  if (!isOk(checkRunsPages)) return checkRunsPages;
+  const combinedPages = parseJson<RawCombinedStatusPage[]>(combinedStatusRaw);
+  if (!isOk(combinedPages)) return combinedPages;
+
+  const checkRuns = checkRunsPages.value.flatMap((page) => page.check_runs ?? []);
+  const statuses = combinedPages.value.flatMap((page) => page.statuses ?? []);
+  const combinedState = combinedPages.value[0]?.state ?? 'success';
 
   const checks: CheckRun[] = [
-    ...(checkRunsParsed.value.check_runs ?? []).map((run) => ({
+    ...checkRuns.map((run) => ({
       name: run.name,
       status: run.status,
       conclusion: run.conclusion ?? '',
       url: run.html_url ?? run.details_url ?? null,
     })),
-    ...(combinedParsed.value.statuses ?? []).map((status) => ({
+    ...statuses.map((status) => ({
       name: status.context,
       // Legacy statuses have no lifecycle field; map their state onto status/conclusion so the
       // rollup treats a pending status as in-flight and a non-pending one as completed.
@@ -590,7 +607,7 @@ function parseChecks(
     })),
   ];
 
-  return ok({ state: computeOverallState(checks, combinedParsed.value.state), checks });
+  return ok({ state: computeOverallState(checks, combinedState), checks });
 }
 
 function computeOverallState(

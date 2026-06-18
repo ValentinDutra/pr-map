@@ -46,6 +46,9 @@ export interface PrMeta {
   author: string;
   baseRef: string;
   headRef: string;
+  // Immutable head commit SHA. Preferred over headRef (a branch name) for fetching file
+  // content, since the SHA still resolves after the branch is deleted or force-pushed.
+  headSha: string;
 }
 
 export interface PrGraph {

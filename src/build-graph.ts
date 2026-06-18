@@ -174,9 +174,22 @@ function importPatternsFor(prPath: string): string[] {
   const withoutExtension = prPath.replace(/\.[^./]+$/, '');
   const baseName = withoutExtension.slice(withoutExtension.lastIndexOf('/') + 1);
   const dottedModule = withoutExtension.replace(/\//g, '.');
-  return [...new Set([withoutExtension, baseName, dottedModule])].filter(
-    (pattern) => pattern.length > 0,
-  );
+  const patterns = [withoutExtension, baseName, dottedModule];
+  // An index file (src/utils/index.ts, pkg/__init__.py) is imported as its directory
+  // (`from './utils'`, `import pkg`), so also search by the directory path, its basename, and
+  // its dotted form — none of which appear in the stem patterns above. resolve() still confirms
+  // each candidate, so a broader search only finds real importers, never invents edges.
+  if (baseName === 'index' || baseName === '__init__') {
+    const directory = withoutExtension.slice(0, withoutExtension.lastIndexOf('/'));
+    if (directory) {
+      patterns.push(
+        directory,
+        directory.slice(directory.lastIndexOf('/') + 1),
+        directory.replace(/\//g, '.'),
+      );
+    }
+  }
+  return [...new Set(patterns)].filter((pattern) => pattern.length > 0);
 }
 
 export interface IncomingTarget {

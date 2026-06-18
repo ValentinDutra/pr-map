@@ -118,6 +118,15 @@ export function GraphView({ graph }: { graph: PrGraph }) {
     return { neighbors, connectedEdgeIds };
   }, [filtered.edges, selectedNodeId]);
 
+  // If a filter removes the selected node, clear the selection so focus styling doesn't fade the
+  // whole graph around a node that is no longer on the canvas (and the detail panel stops showing
+  // a filtered-out file).
+  useEffect(() => {
+    if (selectedNodeId && !filtered.nodes.some((node) => node.id === selectedNodeId)) {
+      select(null);
+    }
+  }, [filtered, selectedNodeId, select]);
+
   // Re-apply the dagre layout whenever the graph or search query changes; between
   // those changes the user can freely drag nodes (onNodesChange keeps them in state).
   useEffect(() => {
