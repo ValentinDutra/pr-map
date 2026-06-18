@@ -130,6 +130,18 @@ describe('createGhClient', () => {
     expect(isOk(result)).toBe(true);
   });
 
+  it('does not retry a write mutation, so a transient error never duplicates the post', async () => {
+    const { execute, calls } = recordingExecutor([err({ message: 'transient' }), ok('')]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    const result = await client.createConversationComment(42, 'general thought');
+
+    // Reads retry (see the test above); writes must not — gh can exit non-zero after GitHub
+    // already accepted the post, so a retry would create a duplicate comment/review.
+    expect(calls).toHaveLength(1);
+    expect(isOk(result)).toBe(false);
+  });
+
   it('createReview maps a multi-line range comment to start_line/start_side', async () => {
     const { execute, calls } = recordingExecutor([ok('')]);
     const client = createGhClient(execute, noDelayRetry);

@@ -226,7 +226,14 @@ export function createFileReviewStore(dataDir: string, prNumber: number): Review
 
   const readState = async (): Promise<ReviewState> => {
     try {
-      return JSON.parse(await readFile(filePath, 'utf8')) as ReviewState;
+      const parsed = JSON.parse(await readFile(filePath, 'utf8')) as ReviewState;
+      // Guard against structurally-valid JSON with the wrong shape (e.g. a hand-edited file
+      // missing `comments`): a non-array would make a later `[...state.comments]` throw.
+      if (!Array.isArray(parsed.comments)) {
+        console.warn(`pr-map: ${filePath} has no comments array; starting a fresh pending review.`);
+        return { prNumber, comments: [] };
+      }
+      return parsed;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
         console.warn(`pr-map: could not read ${filePath}; starting a fresh pending review.`);
@@ -343,6 +350,12 @@ export function createReviewRouter(deps: ReviewRouterDeps): Router {
         return;
       }
       const state = await deps.store.load();
+      if (state.prNumber <= 0) {
+        response.status(400).json({
+          error: 'PR number is unknown; regenerate graph.json before posting a comment.',
+        });
+        return;
+      }
       const result = await deps.ghClient.createConversationComment(state.prNumber, body);
       if (isOk(result)) {
         response.json({ ok: true });
@@ -361,6 +374,12 @@ export function createReviewRouter(deps: ReviewRouterDeps): Router {
         return;
       }
       const state = await deps.store.load();
+      if (state.prNumber <= 0) {
+        response.status(400).json({
+          error: 'PR number is unknown; regenerate graph.json before replying.',
+        });
+        return;
+      }
       const result = await deps.ghClient.replyToComment(state.prNumber, commentId as number, body);
       if (isOk(result)) {
         response.json({ ok: true });

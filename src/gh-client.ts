@@ -142,6 +142,12 @@ export function createGhClient(
   const run = (args: string[], stdin?: string): Promise<Result<string, GhError>> =>
     retry(() => execute(args, stdin), retryOptions);
 
+  // Reads are retried (idempotent). Writes/mutations are NOT retried: gh can exit non-zero on a
+  // transient error after GitHub already created the resource, so a retry would post a duplicate
+  // review or comment. A failed write surfaces to the user, who can retry it deliberately.
+  const runWrite = (args: string[], stdin?: string): Promise<Result<string, GhError>> =>
+    execute(args, stdin);
+
   return {
     async getPrMetadata(ref) {
       const args = ['pr', 'view'];
@@ -179,7 +185,7 @@ export function createGhClient(
     },
 
     createReview(prNumber, submission) {
-      return run(
+      return runWrite(
         [
           'api',
           `repos/{owner}/{repo}/pulls/${prNumber}/reviews`,
@@ -204,7 +210,7 @@ export function createGhClient(
     },
 
     replyToComment(prNumber, commentId, body) {
-      return run(
+      return runWrite(
         [
           'api',
           `repos/{owner}/{repo}/pulls/${prNumber}/comments/${commentId}/replies`,
@@ -231,7 +237,7 @@ export function createGhClient(
     // File-level comments are not accepted by the bulk reviews endpoint, so they go through
     // the standalone review-comment endpoint, which needs the head commit_id and subject_type.
     createFileComment(prNumber, commitId, path, body) {
-      return run(
+      return runWrite(
         [
           'api',
           `repos/{owner}/{repo}/pulls/${prNumber}/comments`,
@@ -245,7 +251,7 @@ export function createGhClient(
     },
 
     createConversationComment(prNumber, body) {
-      return run(
+      return runWrite(
         [
           'api',
           `repos/{owner}/{repo}/issues/${prNumber}/comments`,
@@ -299,7 +305,7 @@ export function createGhClient(
     },
 
     resolveReviewThread(threadId) {
-      return run([
+      return runWrite([
         'api',
         'graphql',
         '-F',
@@ -310,7 +316,7 @@ export function createGhClient(
     },
 
     unresolveReviewThread(threadId) {
-      return run([
+      return runWrite([
         'api',
         'graphql',
         '-F',

@@ -251,6 +251,7 @@ export function DetailPanel({
             </button>
           ) : (
             <DiffView
+              key={node.path}
               patch={node.patch}
               path={node.path}
               comments={fileComments}
