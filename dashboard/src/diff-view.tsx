@@ -3,6 +3,7 @@ import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { reviewApi } from './review-api';
 import { formatCommentTimestamp } from './format';
+import { buildSuggestionBlock, currentLineContents, hasSuggestionBlock } from './suggestion';
 import type { PendingComment, ReviewThread } from './types';
 
 // Above this many diff lines, switch from rendering every row to a measured, windowed list
@@ -300,6 +301,17 @@ export function DiffView({
     }
   };
 
+  // Prefill a GitHub ```suggestion block with the current content of the commented line(s) so the
+  // reviewer edits the replacement text in place. Anchored to the same line range as the comment,
+  // GitHub renders it as an applyable suggestion. Appended below any prose already typed; a no-op
+  // once a block is present so it never stacks two.
+  const insertSuggestion = () => {
+    if (!target || hasSuggestionBlock(body)) return;
+    const startLine = target.startLine ?? target.line;
+    const block = buildSuggestionBlock(currentLineContents(lines, lineMeta, startLine, target.line));
+    setBody((current) => (current.trim() ? `${current.replace(/\n*$/, '')}\n\n${block}` : block));
+  };
+
   const submitFileComment = async () => {
     if (!fileBody.trim()) return;
     try {
@@ -382,6 +394,12 @@ export function DiffView({
               }
               className="h-20 rounded border border-slate-300 p-2 font-sans text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
             />
+            {hasSuggestionBlock(body) ? (
+              <span className="text-xs text-slate-500 dark:text-slate-400">
+                Suggestion block added — edit the replacement inside the{' '}
+                <span className="font-mono">```suggestion</span> fence.
+              </span>
+            ) : null}
             <div className="flex gap-2">
               <button
                 type="button"
@@ -390,6 +408,15 @@ export function DiffView({
                 className="rounded bg-slate-800 px-3 py-1.5 text-sm text-white disabled:opacity-40 dark:bg-slate-700"
               >
                 Add comment
+              </button>
+              <button
+                type="button"
+                onClick={insertSuggestion}
+                disabled={hasSuggestionBlock(body)}
+                title="Prefill a GitHub suggestion with the current line content"
+                className="rounded border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-600 hover:bg-slate-100 disabled:opacity-40 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800"
+              >
+                Suggest change
               </button>
               <button
                 type="button"
