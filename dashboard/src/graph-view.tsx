@@ -13,6 +13,7 @@ import type { GraphEdge, GraphNode, PrGraph } from './types';
 import { layoutGraph } from './layout';
 import { FileNode, type FileFlowNode } from './file-node';
 import { useSelection } from './store';
+import { useViewedState } from './viewed-state';
 import {
   filterGraph,
   folderOptions,
@@ -79,6 +80,15 @@ export function GraphView({ graph }: { graph: PrGraph }) {
   const [filters, setFilters] = useState<GraphFilterState>(initialGraphFilterState);
   const select = useSelection((state) => state.select);
   const selectedNodeId = useSelection((state) => state.selectedNodeId);
+  const viewedPaths = useViewedState((state) => state.viewedPaths);
+
+  // Progress is measured over the files actually changed in this PR; context-only neighbours
+  // are not something the reviewer checks off, so they never count toward the total.
+  const changedFilePaths = useMemo(
+    () => graph.nodes.filter((node) => node.inPr).map((node) => node.path),
+    [graph.nodes],
+  );
+  const viewedChangedCount = changedFilePaths.filter((path) => viewedPaths.has(path)).length;
 
   const folders = useMemo(() => folderOptions(graph.nodes), [graph.nodes]);
   // The graph narrowed by the active filters (changed-files-only, risky-only, folder). All
@@ -137,12 +147,14 @@ export function GraphView({ graph }: { graph: PrGraph }) {
         ...node,
         data: {
           ...node.data,
+          // Only changed files carry a viewed state; neighbours are context, never checked off.
+          viewed: node.data.inPr && viewedPaths.has(node.data.label),
           focused: focus ? node.id === selectedNodeId : false,
           dimmed: focus ? !focus.neighbors.has(node.id) : false,
         },
       })),
     );
-  }, [focus, selectedNodeId, layout, setEdges, setNodes]);
+  }, [focus, selectedNodeId, layout, viewedPaths, setEdges, setNodes]);
 
   return (
     <div className="relative h-full w-full">
@@ -198,6 +210,11 @@ export function GraphView({ graph }: { graph: PrGraph }) {
         <div className="text-[10px] text-slate-500 dark:text-slate-400">
           showing {filtered.nodes.length} of {graph.nodes.length} files
         </div>
+        {changedFilePaths.length > 0 ? (
+          <div className="text-[10px] font-medium text-slate-600 dark:text-slate-300">
+            viewed {viewedChangedCount} of {changedFilePaths.length}
+          </div>
+        ) : null}
         <div className="text-[10px] text-slate-500 dark:text-slate-400">
           solid grey = real import · dashed purple = AI-inferred
         </div>

@@ -4,6 +4,7 @@ import { Sidebar } from './sidebar';
 import { useTheme } from './theme';
 import { useResizablePanel } from './use-resizable-panel';
 import { useReviewRefresh } from './store';
+import { useViewedState } from './viewed-state';
 import { reviewApi } from './review-api';
 import graphFixture from './__fixtures__/graph.json';
 import type { ChecksState, ChecksSummary, PrGraph, ReviewEvent } from './types';
@@ -198,6 +199,13 @@ export function App() {
   const [graph, setGraph] = useState<PrGraph | null>(null);
   const [trayOpen, setTrayOpen] = useState(false);
   const { width, startResize } = useResizablePanel();
+  const bindViewedToPr = useViewedState((state) => state.bindToPr);
+
+  // Hydrate the per-PR viewed set from localStorage once the graph's identity is known. Keying
+  // by owner/repo/number means switching to a different PR loads that PR's own progress.
+  useEffect(() => {
+    if (graph) bindViewedToPr(graph.meta.owner, graph.meta.repo, graph.meta.number);
+  }, [graph, bindViewedToPr]);
 
   useEffect(() => {
     // Served by the pr-map server this returns the real PR graph; running the static
