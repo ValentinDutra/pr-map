@@ -103,3 +103,20 @@ export interface ExistingDiscussion {
   reviewComments: ExistingReviewComment[];
   conversationComments: ExistingConversationComment[];
 }
+
+// The overall CI verdict for the PR's head commit, rolled up across every check.
+export type ChecksState = 'success' | 'failure' | 'pending';
+
+// A single CI check on the PR's head commit (GitHub Actions, App checks, or legacy statuses).
+export interface CheckRun {
+  name: string;
+  status: string;
+  conclusion: string;
+  url: string | null;
+}
+
+// All checks on the PR's head commit plus the rolled-up overall verdict (read-only).
+export interface ChecksSummary {
+  state: ChecksState;
+  checks: CheckRun[];
+}

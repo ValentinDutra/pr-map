@@ -271,6 +271,135 @@ describe('createGhClient', () => {
     }
   });
 
+  it('listChecks resolves the head sha then queries check-runs and combined status, merging both', async () => {
+    const { execute, calls } = recordingExecutor([
+      ok('feedface\n'),
+      ok(
+        JSON.stringify({
+          check_runs: [
+            {
+              name: 'unit-tests',
+              status: 'completed',
+              conclusion: 'success',
+              html_url: 'https://github.com/acme/shop/runs/1',
+            },
+          ],
+        }),
+      ),
+      ok(
+        JSON.stringify({
+          state: 'success',
+          statuses: [
+            { context: 'ci/legacy', state: 'success', target_url: 'https://ci.example/1' },
+          ],
+        }),
+      ),
+    ]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    const result = await client.listChecks(42);
+
+    expect(calls[0].args).toEqual(['api', 'repos/{owner}/{repo}/pulls/42', '--jq', '.head.sha']);
+    expect(calls[1].args).toEqual([
+      'api',
+      'repos/{owner}/{repo}/commits/feedface/check-runs',
+      '--paginate',
+    ]);
+    expect(calls[2].args).toEqual(['api', 'repos/{owner}/{repo}/commits/feedface/status']);
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value.state).toBe('success');
+      expect(result.value.checks).toEqual([
+        {
+          name: 'unit-tests',
+          status: 'completed',
+          conclusion: 'success',
+          url: 'https://github.com/acme/shop/runs/1',
+        },
+        {
+          name: 'ci/legacy',
+          status: 'completed',
+          conclusion: 'success',
+          url: 'https://ci.example/1',
+        },
+      ]);
+    }
+  });
+
+  it('listChecks reports pending when any check-run is still in progress', async () => {
+    const { execute } = recordingExecutor([
+      ok('sha\n'),
+      ok(
+        JSON.stringify({
+          check_runs: [{ name: 'build', status: 'in_progress', conclusion: null, html_url: null }],
+        }),
+      ),
+      ok(JSON.stringify({ state: 'success', statuses: [] })),
+    ]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    const result = await client.listChecks(42);
+
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) expect(result.value.state).toBe('pending');
+  });
+
+  it('listChecks reports failure when a settled check-run failed and none are pending', async () => {
+    const { execute } = recordingExecutor([
+      ok('sha\n'),
+      ok(
+        JSON.stringify({
+          check_runs: [
+            { name: 'lint', status: 'completed', conclusion: 'success', html_url: null },
+            { name: 'e2e', status: 'completed', conclusion: 'timed_out', html_url: null },
+          ],
+        }),
+      ),
+      ok(JSON.stringify({ state: 'success', statuses: [] })),
+    ]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    const result = await client.listChecks(42);
+
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) expect(result.value.state).toBe('failure');
+  });
+
+  it('listChecks reports failure from the legacy combined status even with no check-runs', async () => {
+    const { execute } = recordingExecutor([
+      ok('sha\n'),
+      ok(JSON.stringify({ check_runs: [] })),
+      ok(
+        JSON.stringify({
+          state: 'failure',
+          statuses: [{ context: 'ci/legacy', state: 'failure', target_url: null }],
+        }),
+      ),
+    ]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    const result = await client.listChecks(42);
+
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value.state).toBe('failure');
+      expect(result.value.checks).toEqual([
+        { name: 'ci/legacy', status: 'completed', conclusion: 'failure', url: null },
+      ]);
+    }
+  });
+
+  it('listChecks propagates a head-sha failure without querying checks', async () => {
+    const { execute, calls } = recordingExecutor([err({ message: 'no access' })]);
+    const client = createGhClient(execute, noDelayRetry);
+
+    const result = await client.listChecks(42);
+
+    // Three retry attempts on the failing head-sha call, then it gives up before any checks call.
+    expect(calls).toHaveLength(3);
+    expect(isOk(result)).toBe(false);
+  });
+
   it('getHeadSha returns the trimmed head sha', async () => {
     const { execute, calls } = recordingExecutor([ok('deadbeef\n')]);
     const client = createGhClient(execute, noDelayRetry);

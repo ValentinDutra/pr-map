@@ -98,3 +98,23 @@ export interface ExistingConversationComment {
   author: string;
   createdAt: string;
 }
+
+// The overall CI verdict for the PR's head commit, rolled up across every check.
+export type ChecksState = 'success' | 'failure' | 'pending';
+
+// A single CI check on the PR's head commit, normalized from both the check-runs API
+// (GitHub Actions, App checks) and the legacy combined-status API (commit statuses).
+export interface CheckRun {
+  name: string;
+  // The check-runs lifecycle (queued | in_progress | completed); legacy statuses report 'completed'.
+  status: string;
+  // The check-runs outcome (success | failure | …) or the legacy status state (success | failure | pending).
+  conclusion: string;
+  url: string | null;
+}
+
+// All checks on the PR's head commit plus the rolled-up overall verdict (read-only).
+export interface ChecksSummary {
+  state: ChecksState;
+  checks: CheckRun[];
+}

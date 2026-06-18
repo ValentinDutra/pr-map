@@ -1,4 +1,5 @@
 import type {
+  ChecksSummary,
   CommentScope,
   CommentSide,
   ExistingDiscussion,
@@ -28,6 +29,8 @@ export const reviewApi = {
 
   getExisting: () =>
     fetch('/api/existing').then((response) => asJson<ExistingDiscussion>(response)),
+
+  getChecks: () => fetch('/api/checks').then((response) => asJson<ChecksSummary>(response)),
 
   addComment: (input: AddCommentInput) =>
     fetch('/api/review/comment', {
