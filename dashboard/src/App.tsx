@@ -6,8 +6,9 @@ import { useResizablePanel } from './use-resizable-panel';
 import { useReviewRefresh } from './store';
 import { useViewedState } from './viewed-state';
 import { reviewApi } from './review-api';
+import { formatCommentTimestamp } from './format';
 import graphFixture from './__fixtures__/graph.json';
-import type { ChecksState, ChecksSummary, PrGraph, ReviewEvent } from './types';
+import type { ChecksState, ChecksSummary, CommitInfo, PrGraph, ReviewEvent } from './types';
 
 const fixtureGraph = graphFixture as unknown as PrGraph;
 
@@ -195,6 +196,70 @@ function ChecksBadge() {
   );
 }
 
+function CommitsControl() {
+  const [commits, setCommits] = useState<CommitInfo[] | null>(null);
+  const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    reviewApi
+      .getCommits()
+      .then((list) => {
+        if (!cancelled) setCommits(list);
+      })
+      // No commits endpoint (static build) or no commits on the PR: hide the control silently.
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!commits || commits.length === 0) return null;
+
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+    >
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        title="Commits on this PR"
+        className="rounded-md border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+      >
+        {commits.length} commit{commits.length === 1 ? '' : 's'}
+      </button>
+      {open ? (
+        <div className="absolute right-0 top-8 z-20 flex max-h-80 w-96 flex-col gap-1.5 overflow-auto rounded-md border border-slate-200 bg-white p-2 text-xs shadow-lg dark:border-slate-700 dark:bg-slate-900">
+          {commits.map((commit) => (
+            <div key={commit.sha} className="flex flex-col gap-0.5">
+              <div className="flex items-baseline gap-2">
+                <a
+                  href={commit.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="shrink-0 font-mono text-purple-700 hover:underline dark:text-purple-300"
+                  title={commit.sha}
+                >
+                  {commit.shortSha}
+                </a>
+                <span className="min-w-0 flex-1 truncate text-slate-700 dark:text-slate-200" title={commit.message}>
+                  {commit.message}
+                </span>
+              </div>
+              <div className="flex items-baseline gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                <span className="truncate">{commit.author}</span>
+                {commit.date ? <span className="shrink-0">{formatCommentTimestamp(commit.date)}</span> : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function App() {
   const [graph, setGraph] = useState<PrGraph | null>(null);
   const [trayOpen, setTrayOpen] = useState(false);
@@ -232,6 +297,7 @@ export function App() {
           ) : null}
         </div>
         <div className="flex items-center gap-2">
+          <CommitsControl />
           <ChecksBadge />
           <button
             type="button"

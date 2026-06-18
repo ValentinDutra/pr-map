@@ -99,6 +99,18 @@ export interface ExistingConversationComment {
   createdAt: string;
 }
 
+// A single commit on the PR, normalized from the pulls/{number}/commits endpoint (read-only).
+export interface CommitInfo {
+  sha: string;
+  // The abbreviated SHA shown in the UI; first 7 characters of sha.
+  shortSha: string;
+  // The first line of the commit message (the subject).
+  message: string;
+  author: string;
+  date: string;
+  url: string;
+}
+
 // The overall CI verdict for the PR's head commit, rolled up across every check.
 export type ChecksState = 'success' | 'failure' | 'pending';
 

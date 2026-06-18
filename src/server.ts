@@ -11,6 +11,7 @@ import {
   createReviewRouter,
   createExistingRouter,
   createChecksRouter,
+  createCommitsRouter,
   createFileReviewStore,
   type ReviewStore,
 } from './review-endpoints.js';
@@ -53,6 +54,7 @@ export function createApp(deps: ServerDeps): Express {
   app.use('/api/review', createReviewRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use('/api/existing', createExistingRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use('/api/checks', createChecksRouter({ ghClient: deps.ghClient, store: deps.store }));
+  app.use('/api/commits', createCommitsRouter({ ghClient: deps.ghClient, store: deps.store }));
 
   // Any unmatched /api/* path returns JSON 404 instead of falling through to the SPA HTML.
   app.use('/api', (_request, response) => {
