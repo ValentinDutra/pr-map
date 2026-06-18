@@ -443,7 +443,7 @@ function extractChangedSymbols(input) {
   return result;
 }
 
-// src/build-graph.ts
+// src/languages.ts
 var LANGUAGE_BY_EXTENSION = {
   ts: "typescript",
   tsx: "typescript",
@@ -468,7 +468,6 @@ var LANGUAGE_BY_EXTENSION = {
   sh: "shell",
   sql: "sql"
 };
-var JS_TS_LANGUAGES2 = /* @__PURE__ */ new Set(["typescript", "javascript"]);
 function detectLanguage(path2) {
   const lastDot = path2.lastIndexOf(".");
   const lastSlash = path2.lastIndexOf("/");
@@ -476,6 +475,9 @@ function detectLanguage(path2) {
   const extension = path2.slice(lastDot + 1).toLowerCase();
   return LANGUAGE_BY_EXTENSION[extension] ?? extension;
 }
+
+// src/build-graph.ts
+var JS_TS_LANGUAGES2 = /* @__PURE__ */ new Set(["typescript", "javascript"]);
 function buildNodes(rawPr) {
   return rawPr.files.map((file) => ({
     id: file.path,

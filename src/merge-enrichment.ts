@@ -3,6 +3,7 @@ import { realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { type Result, ok, err } from './result.js';
+import { detectLanguage } from './languages.js';
 import type { GraphEdge, NodeInsights, PrGraph } from './types.js';
 
 export interface EnrichmentResult {
@@ -36,6 +37,16 @@ export function mergeEnrichment(graph: PrGraph, results: EnrichmentResult[]): Pr
       if (semantic.target === result.path) continue;
       const id = `${result.path}->${semantic.target}:semantic:outgoing`;
       if (edgesById.has(id)) continue;
+      // The semantic target may be a file the static scan never added (e.g. an alias import
+      // it could not resolve). Add it as a neighbor node so the edge actually renders.
+      if (!nodesById.has(semantic.target)) {
+        nodesById.set(semantic.target, {
+          id: semantic.target,
+          path: semantic.target,
+          language: detectLanguage(semantic.target),
+          inPr: false,
+        });
+      }
       const edge: GraphEdge = {
         id,
         source: result.path,
