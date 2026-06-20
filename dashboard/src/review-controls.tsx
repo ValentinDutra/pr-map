@@ -1,6 +1,12 @@
 import { useState } from 'react';
-import type { ReviewState } from './types';
+import type { ReviewEvent, ReviewState } from './types';
 import { reviewApi } from './review-api';
+
+const VERDICTS: { event: ReviewEvent; label: string }[] = [
+  { event: 'APPROVE', label: 'Approve' },
+  { event: 'REQUEST_CHANGES', label: 'Request changes' },
+  { event: 'COMMENT', label: 'Comment' },
+];
 
 interface ReviewControlsProps {
   pending: ReviewState | null;
@@ -12,6 +18,8 @@ interface ReviewControlsProps {
 export function ReviewControls({ pending, refresh, status, setStatus }: ReviewControlsProps) {
   const [replyId, setReplyId] = useState('');
   const [replyBody, setReplyBody] = useState('');
+  const [summary, setSummary] = useState('');
+  const [verdict, setVerdict] = useState<ReviewEvent>('COMMENT');
 
   const comments = pending?.comments ?? [];
 
@@ -34,6 +42,20 @@ export function ReviewControls({ pending, refresh, status, setStatus }: ReviewCo
       setStatus(`Replied to comment ${commentId}`);
     } catch (error) {
       setStatus(`Reply failed: ${(error as Error).message}`);
+    }
+  };
+
+  // The PR-level comment is the review summary, posted together with the verdict on submit —
+  // the same model GitHub uses, so there is no separate standalone-comment surface.
+  const submitReview = async () => {
+    try {
+      await reviewApi.setSummary(summary);
+      await reviewApi.submit(verdict);
+      setSummary('');
+      setStatus(`Submitted review: ${verdict}`);
+      refresh();
+    } catch (error) {
+      setStatus(`Submit failed: ${(error as Error).message}`);
     }
   };
 
@@ -93,6 +115,38 @@ export function ReviewControls({ pending, refresh, status, setStatus }: ReviewCo
           </button>
         </div>
       </details>
+
+      <div className="flex flex-col gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
+        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
+          Submit review
+        </div>
+        <textarea
+          value={summary}
+          onChange={(event) => setSummary(event.target.value)}
+          placeholder="Review summary (the PR-level comment)…"
+          className="h-20 rounded border border-slate-300 p-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+        />
+        <div className="flex flex-col gap-1">
+          {VERDICTS.map((option) => (
+            <label key={option.event} className="flex items-center gap-2 text-slate-700 dark:text-slate-200">
+              <input
+                type="radio"
+                name="verdict"
+                checked={verdict === option.event}
+                onChange={() => setVerdict(option.event)}
+              />
+              {option.label}
+            </label>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={submitReview}
+          className="self-start rounded bg-slate-800 px-3 py-1.5 text-sm text-white dark:bg-slate-700"
+        >
+          Submit review
+        </button>
+      </div>
 
       {status ? <div className="text-xs text-slate-500 dark:text-slate-400">{status}</div> : null}
     </section>

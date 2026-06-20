@@ -10,7 +10,7 @@ export const useSelection = create<SelectionState>((set) => ({
   select: (id) => set({ selectedNodeId: id }),
 }));
 
-export type DetailTab = 'diff' | 'insights' | 'conversation';
+export type DetailTab = 'diff' | 'insights';
 
 interface PanelTabState {
   activeTab: DetailTab;
@@ -20,15 +20,4 @@ interface PanelTabState {
 export const usePanelTab = create<PanelTabState>((set) => ({
   activeTab: 'diff',
   setTab: (tab) => set({ activeTab: tab }),
-}));
-
-interface ReviewRefreshState {
-  version: number;
-  bump: () => void;
-}
-
-// Bumped after a mutation (submit/conversation) so independent panels re-fetch pending state.
-export const useReviewRefresh = create<ReviewRefreshState>((set) => ({
-  version: 0,
-  bump: () => set((state) => ({ version: state.version + 1 })),
 }));

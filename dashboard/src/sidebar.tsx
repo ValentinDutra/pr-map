@@ -1,16 +1,14 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ExistingDiscussion, PrGraph, ReviewState, ReviewThread } from './types';
+import type { PrGraph, ReviewState, ReviewThread } from './types';
 import { reviewApi } from './review-api';
-import { useReviewRefresh } from './store';
+import { PrContextBar } from './pr-context';
 import { DetailPanel } from './detail-panel';
 import { ReviewControls } from './review-controls';
 
 export function Sidebar({ graph, width }: { graph: PrGraph; width: number }) {
   const [pending, setPending] = useState<ReviewState | null>(null);
-  const [existing, setExisting] = useState<ExistingDiscussion | null>(null);
   const [threads, setThreads] = useState<ReviewThread[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
-  const version = useReviewRefresh((state) => state.version);
 
   const refresh = useCallback(() => {
     reviewApi
@@ -19,19 +17,9 @@ export function Sidebar({ graph, width }: { graph: PrGraph; width: number }) {
       .catch(() => setStatus('Could not load pending review (is the server running?)'));
   }, []);
 
-  // Re-fetch when this panel mounts and whenever another panel (the Finish-review tray) mutates.
   useEffect(() => {
     refresh();
-  }, [refresh, version]);
-
-  // The PR's already-posted discussion is read-only, so fetch it once on mount and reuse it
-  // for every selected file rather than refetching per render.
-  useEffect(() => {
-    reviewApi
-      .getExisting()
-      .then(setExisting)
-      .catch(() => undefined);
-  }, []);
+  }, [refresh]);
 
   // Review threads carry resolve state that the dashboard can mutate, so they are re-fetchable:
   // load on mount and again after every resolve/unresolve so the UI reflects the new state.
@@ -51,10 +39,10 @@ export function Sidebar({ graph, width }: { graph: PrGraph; width: number }) {
       style={{ width }}
       className="flex h-full shrink-0 flex-col gap-4 overflow-auto bg-white p-5 text-sm text-slate-800 dark:bg-slate-900 dark:text-slate-100"
     >
+      <PrContextBar />
       <DetailPanel
         graph={graph}
         pending={pending}
-        existing={existing}
         threads={threads}
         onChange={refresh}
         onThreadsChange={refreshThreads}
