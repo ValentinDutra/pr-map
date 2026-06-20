@@ -4,6 +4,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import { reviewApi } from './review-api';
 import { formatCommentTimestamp } from './format';
 import { buildSuggestionBlock, currentLineContents, hasSuggestionBlock } from './suggestion';
+import { languageForPath, tokenizeCode, type SyntaxToken } from './syntax';
 import type { PendingComment, ReviewThread } from './types';
 
 // Above this many diff lines, switch from rendering every row to a measured, windowed list
@@ -66,6 +67,36 @@ function lineBackground(text: string): string {
   if (text.startsWith('-') && !text.startsWith('---')) return 'bg-red-100/70 dark:bg-red-950/40';
   if (text.startsWith('@@')) return 'bg-blue-50 text-blue-700 dark:bg-blue-950/40 dark:text-blue-300';
   return '';
+}
+
+// Render a Prism token stream to React nodes, tagging each with its `token <type>` classes so
+// the CSS theme in index.css colors it.
+function renderToken(token: SyntaxToken, key: number): ReactNode {
+  if (typeof token === 'string') return token;
+  const content = Array.isArray(token.content)
+    ? token.content.map((child, index) => renderToken(child as SyntaxToken, index))
+    : renderToken(token.content as SyntaxToken, 0);
+  const aliasName = Array.isArray(token.alias) ? token.alias.join(' ') : token.alias;
+  return (
+    <span key={key} className={`token ${token.type}${aliasName ? ` ${aliasName}` : ''}`}>
+      {content}
+    </span>
+  );
+}
+
+// A diff code line: the leading +/-/space marker kept verbatim, the rest highlighted by the
+// file's language. Falls back to plain text when the language is unknown.
+function DiffCode({ text, language }: { text: string; language: string | null }): ReactNode {
+  if (!language || text === '') return text || ' ';
+  const marker = text[0];
+  const hasMarker = marker === '+' || marker === '-' || marker === ' ';
+  const code = hasMarker ? text.slice(1) : text;
+  return (
+    <>
+      {hasMarker ? marker : ''}
+      {tokenizeCode(code, language).map((token, index) => renderToken(token, index))}
+    </>
+  );
 }
 
 interface DiffViewProps {
@@ -261,6 +292,7 @@ export function DiffView({
 }: DiffViewProps) {
   const lines = patch.split('\n');
   const lineMeta = computeLineMeta(patch);
+  const language = languageForPath(path);
   const [target, setTarget] = useState<{ startLine?: number; line: number } | null>(null);
   const [body, setBody] = useState('');
   const [fileOpen, setFileOpen] = useState(false);
@@ -399,6 +431,7 @@ export function DiffView({
     const text = lines[lineIndex];
     const { oldLine, newLine } = lineMeta[lineIndex] ?? { oldLine: null, newLine: null };
     const commentable = newLine !== null;
+    const isHeaderLine = oldLine === null && newLine === null;
     return (
       <>
         <div
@@ -429,7 +462,9 @@ export function DiffView({
           >
             {newLine ?? ''}
           </span>
-          <span className="flex-1 whitespace-pre-wrap break-words px-3">{text || ' '}</span>
+          <span className="flex-1 whitespace-pre-wrap break-words px-3">
+            {isHeaderLine ? text || ' ' : <DiffCode text={text} language={language} />}
+          </span>
         </div>
 
         {lineThreads
