@@ -21,11 +21,14 @@ export function topLevelDirectory(path: string): string {
   return separatorIndex === -1 ? '' : path.slice(0, separatorIndex);
 }
 
+// How many AI-flagged risks plus suspected bugs a node carries (0 when it has no insights —
+// e.g. a graph built without the enrichment step).
+export function riskCount(node: GraphNode): number {
+  return node.insights ? node.insights.risks.length + node.insights.suspectedBugs.length : 0;
+}
+
 export function nodeHasRisk(node: GraphNode): boolean {
-  return Boolean(
-    node.insights &&
-      node.insights.risks.length + node.insights.suspectedBugs.length > 0,
-  );
+  return riskCount(node) > 0;
 }
 
 // Distinct top-level directories present in the graph, sorted for a stable dropdown order.
