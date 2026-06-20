@@ -1,8 +1,6 @@
 import { type CSSProperties, useEffect, useMemo, useState } from 'react';
 import {
   Background,
-  Controls,
-  MiniMap,
   ReactFlow,
   useEdgesState,
   useNodesState,
@@ -168,9 +166,6 @@ export function GraphView({ graph }: { graph: PrGraph }) {
   return (
     <div className="relative h-full w-full">
       <div className="absolute left-4 top-4 z-10 flex flex-col gap-1 rounded-md bg-white/90 p-3 shadow dark:bg-slate-900/90">
-        <div className="text-sm font-semibold text-slate-800 dark:text-slate-100">
-          #{graph.meta.number} {graph.meta.title}
-        </div>
         <input
           value={query}
           onChange={(event) => setQuery(event.target.value)}
@@ -246,10 +241,9 @@ export function GraphView({ graph }: { graph: PrGraph }) {
         onNodeClick={(_, node) => select(node.id)}
         onPaneClick={() => select(null)}
         fitView
+        proOptions={{ hideAttribution: true }}
       >
         <Background />
-        <Controls />
-        <MiniMap pannable zoomable />
       </ReactFlow>
     </div>
   );

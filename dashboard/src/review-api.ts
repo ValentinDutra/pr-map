@@ -3,7 +3,6 @@ import type {
   CommentScope,
   CommentSide,
   CommitInfo,
-  ExistingDiscussion,
   ReviewEvent,
   ReviewState,
   ReviewThread,
@@ -28,9 +27,6 @@ export interface AddCommentInput {
 
 export const reviewApi = {
   getPending: () => fetch('/api/review/pending').then((response) => asJson<ReviewState>(response)),
-
-  getExisting: () =>
-    fetch('/api/existing').then((response) => asJson<ExistingDiscussion>(response)),
 
   getChecks: () => fetch('/api/checks').then((response) => asJson<ChecksSummary>(response)),
 
@@ -65,13 +61,6 @@ export const reviewApi = {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ commentId, body }),
-    }).then((response) => asJson<{ ok: boolean }>(response)),
-
-  addConversationComment: (body: string) =>
-    fetch('/api/review/conversation', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ body }),
     }).then((response) => asJson<{ ok: boolean }>(response)),
 
   setSummary: (body: string) =>

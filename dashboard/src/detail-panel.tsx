@@ -1,12 +1,9 @@
-import { useState } from 'react';
 import type { DetailTab } from './store';
-import type { ExistingDiscussion, GraphEdge, PrGraph, ReviewState, ReviewThread } from './types';
+import type { GraphEdge, PrGraph, ReviewState, ReviewThread } from './types';
 import { useSelection, usePanelTab } from './store';
 import { useViewedState } from './viewed-state';
 import { DiffView } from './diff-view';
 import { AiSuggestionBadge } from './ai-suggestion-badge';
-import { formatCommentTimestamp } from './format';
-import { reviewApi } from './review-api';
 
 function originBadge(edge: GraphEdge): string {
   return edge.origin === 'llm'
@@ -36,13 +33,11 @@ function InsightList({ label, items, color }: { label: string; items: string[]; 
 const TABS: { id: DetailTab; label: string }[] = [
   { id: 'diff', label: 'Diff' },
   { id: 'insights', label: 'Insights' },
-  { id: 'conversation', label: 'Conversation' },
 ];
 
 interface DetailPanelProps {
   graph: PrGraph;
   pending: ReviewState | null;
-  existing: ExistingDiscussion | null;
   threads: ReviewThread[] | null;
   onChange: () => void;
   onThreadsChange: () => void;
@@ -52,7 +47,6 @@ interface DetailPanelProps {
 export function DetailPanel({
   graph,
   pending,
-  existing,
   threads,
   onChange,
   onThreadsChange,
@@ -63,20 +57,6 @@ export function DetailPanel({
   const setTab = usePanelTab((state) => state.setTab);
   const viewedPaths = useViewedState((state) => state.viewedPaths);
   const toggleViewed = useViewedState((state) => state.toggle);
-  const [conversationBody, setConversationBody] = useState('');
-  const [postedComments, setPostedComments] = useState<string[]>([]);
-
-  const postConversationComment = async () => {
-    if (!conversationBody.trim()) return;
-    try {
-      await reviewApi.addConversationComment(conversationBody);
-      setPostedComments((previous) => [...previous, conversationBody]);
-      setConversationBody('');
-      setStatus('Posted conversation comment');
-    } catch (error) {
-      setStatus(`Conversation comment failed: ${(error as Error).message}`);
-    }
-  };
 
   const node = graph.nodes.find((candidate) => candidate.id === selectedNodeId);
   if (!node) {
@@ -266,58 +246,6 @@ export function DetailPanel({
             No diff — this file is a neighbor, not changed in this PR.
           </p>
         )
-      ) : null}
-
-      {activeTab === 'conversation' ? (
-        <div className="flex flex-col gap-2">
-          {existing && existing.conversationComments.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
-                Existing comments ({existing.conversationComments.length})
-              </div>
-              {existing.conversationComments.map((comment) => (
-                <div
-                  key={comment.id}
-                  className="rounded border border-slate-200 bg-slate-50 p-3 text-sm text-slate-700 dark:border-slate-700 dark:bg-slate-800/60 dark:text-slate-200"
-                >
-                  <div className="mb-1 flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
-                    <span className="font-medium text-slate-600 dark:text-slate-300">
-                      {comment.author}
-                    </span>
-                    <span>·</span>
-                    <span>{formatCommentTimestamp(comment.createdAt)}</span>
-                  </div>
-                  <div className="whitespace-pre-wrap break-words">{comment.body}</div>
-                </div>
-              ))}
-            </div>
-          ) : null}
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            A standalone PR comment, posted to the Conversation tab on GitHub immediately.
-          </p>
-          {postedComments.map((text, index) => (
-            <div
-              key={index}
-              className="rounded border border-slate-200 p-3 text-sm text-slate-700 dark:border-slate-700 dark:text-slate-200"
-            >
-              {text}
-            </div>
-          ))}
-          <textarea
-            value={conversationBody}
-            onChange={(event) => setConversationBody(event.target.value)}
-            placeholder="Comment on the whole PR…"
-            className="h-24 rounded border border-slate-300 p-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-          />
-          <button
-            type="button"
-            onClick={postConversationComment}
-            disabled={!conversationBody.trim()}
-            className="self-start rounded bg-slate-800 px-3 py-1.5 text-sm text-white disabled:opacity-40 dark:bg-slate-700"
-          >
-            Post comment
-          </button>
-        </div>
       ) : null}
     </section>
   );
