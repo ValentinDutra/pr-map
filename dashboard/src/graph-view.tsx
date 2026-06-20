@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useMemo, useState } from 'react';
+import { type CSSProperties, useCallback, useEffect, useMemo, useState } from 'react';
 import {
   Background,
   ReactFlow,
@@ -11,8 +11,10 @@ import {
 import type { GraphEdge, GraphNode, PrGraph } from './types';
 import { layoutGraph } from './layout';
 import { FileNode, type FileFlowNode } from './file-node';
-import { useSelection } from './store';
+import { useSelection, usePanelTab } from './store';
 import { useViewedState } from './viewed-state';
+import { useReviewKeys } from './use-review-keys';
+import { KeyboardHelp } from './keyboard-help';
 import {
   filterGraph,
   folderOptions,
@@ -83,6 +85,10 @@ export function GraphView({ graph }: { graph: PrGraph }) {
   const viewedPaths = useViewedState((state) => state.viewedPaths);
   const [rfInstance, setRfInstance] = useState<ReactFlowInstance<FileFlowNode, Edge> | null>(null);
   const [riskIndex, setRiskIndex] = useState(0);
+  const [helpOpen, setHelpOpen] = useState(false);
+  const toggleViewed = useViewedState((state) => state.toggle);
+  const setTab = usePanelTab((state) => state.setTab);
+  const toggleHelp = useCallback(() => setHelpOpen((open) => !open), []);
 
   // Progress is measured over the files actually changed in this PR; context-only neighbours
   // are not something the reviewer checks off, so they never count toward the total.
@@ -91,6 +97,11 @@ export function GraphView({ graph }: { graph: PrGraph }) {
     [graph.nodes],
   );
   const viewedChangedCount = changedFilePaths.filter((path) => viewedPaths.has(path)).length;
+  // Changed files as {id, path} in graph order — the sequence keyboard navigation walks.
+  const changedNodes = useMemo(
+    () => graph.nodes.filter((node) => node.inPr).map((node) => ({ id: node.id, path: node.path })),
+    [graph.nodes],
+  );
 
   const folders = useMemo(() => folderOptions(graph.nodes), [graph.nodes]);
   // The graph narrowed by the active filters (changed-files-only, risky-only, folder). All
@@ -99,15 +110,32 @@ export function GraphView({ graph }: { graph: PrGraph }) {
   // Risky files in the current (filtered) view, for the "next risk" jump control.
   const riskyNodes = useMemo(() => filtered.nodes.filter(nodeHasRisk), [filtered.nodes]);
 
+  // Select a node and pan the canvas to it — shared by the risk jump and keyboard navigation.
+  const selectAndPan = useCallback(
+    (nodeId: string) => {
+      select(nodeId);
+      rfInstance?.fitView({ nodes: [{ id: nodeId }], duration: 400, maxZoom: 1.2, padding: 0.3 });
+    },
+    [select, rfInstance],
+  );
+
   // Cycle selection through risky files, panning the canvas to each in turn.
   const jumpToNextRisk = () => {
     if (riskyNodes.length === 0) return;
     const index = riskIndex % riskyNodes.length;
-    const node = riskyNodes[index];
     setRiskIndex(index + 1);
-    select(node.id);
-    rfInstance?.fitView({ nodes: [{ id: node.id }], duration: 400, maxZoom: 1.2, padding: 0.3 });
+    selectAndPan(riskyNodes[index].id);
   };
+
+  useReviewKeys({
+    nodes: changedNodes,
+    selectedNodeId,
+    viewedPaths,
+    onSelect: selectAndPan,
+    onToggleViewed: toggleViewed,
+    onSetTab: setTab,
+    onToggleHelp: toggleHelp,
+  });
   const layout = useMemo(
     () => buildFlow(filtered.nodes, filtered.edges, query),
     [filtered, query],
@@ -241,6 +269,9 @@ export function GraphView({ graph }: { graph: PrGraph }) {
         <div className="text-[10px] text-slate-500 dark:text-slate-400">
           click a file to trace its flow
         </div>
+        <div className="text-[10px] text-slate-500 dark:text-slate-400">
+          press <span className="font-mono">?</span> for keyboard shortcuts
+        </div>
         {graph.hiddenNeighborCount > 0 ? (
           <div className="text-[10px] text-slate-500 dark:text-slate-400">
             {graph.hiddenNeighborCount} importer{graph.hiddenNeighborCount === 1 ? '' : 's'} with no
@@ -272,6 +303,7 @@ export function GraphView({ graph }: { graph: PrGraph }) {
       >
         <Background />
       </ReactFlow>
+      <KeyboardHelp open={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   );
 }
