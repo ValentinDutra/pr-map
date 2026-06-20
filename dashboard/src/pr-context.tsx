@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { reviewApi } from './review-api';
 import { formatCommentTimestamp } from './format';
-import type { ChecksState, ChecksSummary, CommitInfo } from './types';
+import type { ChecksState, ChecksSummary, CommitInfo, ExistingDiscussion } from './types';
 
 const CHECKS_LABEL: Record<ChecksState, string> = {
   success: 'Checks passing',
@@ -29,11 +29,12 @@ function checkStateColor(check: ChecksSummary['checks'][number]): string {
 
 // PR-wide context (commits + checks) that used to live in the header. In the sidebar a floating
 // popover would overflow the narrow panel, so each row expands inline below itself instead.
-type OpenSection = 'commits' | 'checks' | null;
+type OpenSection = 'commits' | 'checks' | 'discussion' | null;
 
 export function PrContextBar() {
   const [commits, setCommits] = useState<CommitInfo[] | null>(null);
   const [checks, setChecks] = useState<ChecksSummary | null>(null);
+  const [discussion, setDiscussion] = useState<ExistingDiscussion | null>(null);
   const [open, setOpen] = useState<OpenSection>(null);
 
   useEffect(() => {
@@ -52,6 +53,12 @@ export function PrContextBar() {
         if (!cancelled) setChecks(summary);
       })
       .catch(() => undefined);
+    reviewApi
+      .getExisting()
+      .then((existing) => {
+        if (!cancelled) setDiscussion(existing);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -61,7 +68,8 @@ export function PrContextBar() {
   // GitHub's combined-status endpoint reports `state: "pending"` for a commit with zero statuses,
   // so an empty checks list would otherwise render a perpetual "pending" — hide it instead.
   const hasChecks = checks !== null && checks.checks.length > 0;
-  if (!hasCommits && !hasChecks) return null;
+  const hasDiscussion = discussion !== null && discussion.conversationComments.length > 0;
+  if (!hasCommits && !hasChecks && !hasDiscussion) return null;
 
   const toggle = (section: Exclude<OpenSection, null>) =>
     setOpen((current) => (current === section ? null : section));
@@ -86,6 +94,15 @@ export function PrContextBar() {
           >
             <span className={`h-2 w-2 shrink-0 rounded-full ${CHECKS_DOT[checks.state]}`} />
             {CHECKS_LABEL[checks.state]} {open === 'checks' ? '▾' : '▸'}
+          </button>
+        ) : null}
+        {hasDiscussion ? (
+          <button
+            type="button"
+            onClick={() => toggle('discussion')}
+            className="font-medium text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-slate-100"
+          >
+            Discussion ({discussion.conversationComments.length}) {open === 'discussion' ? '▾' : '▸'}
           </button>
         ) : null}
       </div>
@@ -140,6 +157,23 @@ export function PrContextBar() {
               <span className="shrink-0 text-slate-500 dark:text-slate-400">
                 {check.conclusion || check.status}
               </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      {open === 'discussion' && hasDiscussion ? (
+        <div className="flex max-h-64 flex-col gap-2 overflow-auto">
+          {discussion.conversationComments.map((comment) => (
+            <div key={comment.id} className="flex flex-col gap-0.5">
+              <div className="flex items-baseline gap-2 text-[11px] text-slate-500 dark:text-slate-400">
+                <span className="font-medium text-slate-600 dark:text-slate-300">{comment.author}</span>
+                <span>·</span>
+                <span>{formatCommentTimestamp(comment.createdAt)}</span>
+              </div>
+              <div className="whitespace-pre-wrap break-words text-slate-700 dark:text-slate-200">
+                {comment.body}
+              </div>
             </div>
           ))}
         </div>
