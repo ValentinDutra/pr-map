@@ -12,12 +12,14 @@
     "@dagrejs/dagre": "^1.1.4",
     "@tanstack/react-virtual": "^3.14.3",
     "@xyflow/react": "^12.3.5",
+    "prismjs": "^1.30.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",
+    "@types/prismjs": "^1.26.6",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",

@@ -9,3 +9,92 @@ body,
   height: 100%;
   margin: 0;
 }
+
+/* Minimal Prism token colors for diff syntax highlighting. Light by default, overridden under
+   the `.dark` ancestor to match the app's class-based dark mode and slate palette. */
+.token.comment,
+.token.prolog,
+.token.doctype,
+.token.cdata {
+  color: #64748b;
+  font-style: italic;
+}
+.token.punctuation {
+  color: #475569;
+}
+.token.keyword,
+.token.tag,
+.token.boolean,
+.token.atrule,
+.token.selector {
+  color: #7c3aed;
+}
+.token.string,
+.token.char,
+.token.attr-value,
+.token.regex {
+  color: #047857;
+}
+.token.function,
+.token.class-name {
+  color: #2563eb;
+}
+.token.number,
+.token.constant,
+.token.symbol {
+  color: #c2410c;
+}
+.token.operator,
+.token.entity,
+.token.url,
+.token.variable {
+  color: #475569;
+}
+.token.property,
+.token.attr-name,
+.token.builtin {
+  color: #0891b2;
+}
+
+.dark .token.comment,
+.dark .token.prolog,
+.dark .token.doctype,
+.dark .token.cdata {
+  color: #94a3b8;
+}
+.dark .token.punctuation {
+  color: #94a3b8;
+}
+.dark .token.keyword,
+.dark .token.tag,
+.dark .token.boolean,
+.dark .token.atrule,
+.dark .token.selector {
+  color: #c4b5fd;
+}
+.dark .token.string,
+.dark .token.char,
+.dark .token.attr-value,
+.dark .token.regex {
+  color: #6ee7b7;
+}
+.dark .token.function,
+.dark .token.class-name {
+  color: #93c5fd;
+}
+.dark .token.number,
+.dark .token.constant,
+.dark .token.symbol {
+  color: #fdba74;
+}
+.dark .token.operator,
+.dark .token.entity,
+.dark .token.url,
+.dark .token.variable {
+  color: #cbd5e1;
+}
+.dark .token.property,
+.dark .token.attr-name,
+.dark .token.builtin {
+  color: #67e8f9;
+}
