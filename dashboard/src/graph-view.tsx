@@ -6,6 +6,7 @@ import {
   useNodesState,
   type Edge,
   type NodeTypes,
+  type ReactFlowInstance,
 } from '@xyflow/react';
 import type { GraphEdge, GraphNode, PrGraph } from './types';
 import { layoutGraph } from './layout';
@@ -17,6 +18,7 @@ import {
   folderOptions,
   initialGraphFilterState,
   nodeHasRisk,
+  riskCount,
   type GraphFilterState,
 } from './graph-filters';
 
@@ -48,7 +50,7 @@ function buildFlow(
       highlighted:
         normalizedQuery.length > 0 &&
         node.path.toLowerCase().includes(normalizedQuery),
-      hasRisk: nodeHasRisk(node),
+      riskCount: riskCount(node),
     },
   }));
 
@@ -79,6 +81,8 @@ export function GraphView({ graph }: { graph: PrGraph }) {
   const select = useSelection((state) => state.select);
   const selectedNodeId = useSelection((state) => state.selectedNodeId);
   const viewedPaths = useViewedState((state) => state.viewedPaths);
+  const [rfInstance, setRfInstance] = useState<ReactFlowInstance<FileFlowNode, Edge> | null>(null);
+  const [riskIndex, setRiskIndex] = useState(0);
 
   // Progress is measured over the files actually changed in this PR; context-only neighbours
   // are not something the reviewer checks off, so they never count toward the total.
@@ -92,6 +96,18 @@ export function GraphView({ graph }: { graph: PrGraph }) {
   // The graph narrowed by the active filters (changed-files-only, risky-only, folder). All
   // downstream work — layout, search highlight, click-to-focus — runs on this filtered set.
   const filtered = useMemo(() => filterGraph(graph, filters), [graph, filters]);
+  // Risky files in the current (filtered) view, for the "next risk" jump control.
+  const riskyNodes = useMemo(() => filtered.nodes.filter(nodeHasRisk), [filtered.nodes]);
+
+  // Cycle selection through risky files, panning the canvas to each in turn.
+  const jumpToNextRisk = () => {
+    if (riskyNodes.length === 0) return;
+    const index = riskIndex % riskyNodes.length;
+    const node = riskyNodes[index];
+    setRiskIndex(index + 1);
+    select(node.id);
+    rfInstance?.fitView({ nodes: [{ id: node.id }], duration: 400, maxZoom: 1.2, padding: 0.3 });
+  };
   const layout = useMemo(
     () => buildFlow(filtered.nodes, filtered.edges, query),
     [filtered, query],
@@ -231,6 +247,16 @@ export function GraphView({ graph }: { graph: PrGraph }) {
             affected symbols, hidden
           </div>
         ) : null}
+        {riskyNodes.length > 0 ? (
+          <button
+            type="button"
+            onClick={jumpToNextRisk}
+            title="Jump to the next file with AI-flagged risks or suspected bugs"
+            className="mt-1 self-start rounded border border-red-300 bg-red-50 px-2 py-1 text-[11px] font-medium text-red-700 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300 dark:hover:bg-red-950/60"
+          >
+            ⚠ {riskyNodes.length} risky · Next →
+          </button>
+        ) : null}
       </div>
       <ReactFlow
         nodes={nodes}
@@ -240,6 +266,7 @@ export function GraphView({ graph }: { graph: PrGraph }) {
         onEdgesChange={onEdgesChange}
         onNodeClick={(_, node) => select(node.id)}
         onPaneClick={() => select(null)}
+        onInit={setRfInstance}
         fitView
         proOptions={{ hideAttribution: true }}
       >
