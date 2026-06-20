@@ -16,8 +16,6 @@ interface ReviewControlsProps {
 }
 
 export function ReviewControls({ pending, refresh, status, setStatus }: ReviewControlsProps) {
-  const [replyId, setReplyId] = useState('');
-  const [replyBody, setReplyBody] = useState('');
   const [summary, setSummary] = useState('');
   const [verdict, setVerdict] = useState<ReviewEvent>('COMMENT');
 
@@ -29,19 +27,6 @@ export function ReviewControls({ pending, refresh, status, setStatus }: ReviewCo
       refresh();
     } catch (error) {
       setStatus(`Delete failed: ${(error as Error).message}`);
-    }
-  };
-
-  const sendReply = async () => {
-    const commentId = Number.parseInt(replyId, 10);
-    if (Number.isNaN(commentId) || !replyBody.trim()) return;
-    try {
-      await reviewApi.reply(commentId, replyBody);
-      setReplyId('');
-      setReplyBody('');
-      setStatus(`Replied to comment ${commentId}`);
-    } catch (error) {
-      setStatus(`Reply failed: ${(error as Error).message}`);
     }
   };
 
@@ -91,30 +76,6 @@ export function ReviewControls({ pending, refresh, status, setStatus }: ReviewCo
           </li>
         ))}
       </ul>
-
-      <details className="text-sm">
-        <summary className="cursor-pointer text-slate-500 dark:text-slate-400">Reply to an existing thread</summary>
-        <div className="mt-1 flex flex-col gap-1">
-          <input
-            value={replyId}
-            onChange={(event) => setReplyId(event.target.value)}
-            placeholder="GitHub comment id"
-            className="rounded border border-slate-300 px-2 py-1 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-          />
-          <textarea
-            value={replyBody}
-            onChange={(event) => setReplyBody(event.target.value)}
-            placeholder="Reply…"
-            className="h-12 rounded border border-slate-300 p-2 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
-          />
-          <button
-            onClick={sendReply}
-            className="self-start rounded bg-slate-700 px-2 py-1 text-white"
-          >
-            Send reply
-          </button>
-        </div>
-      </details>
 
       <div className="flex flex-col gap-2 border-t border-slate-200 pt-3 dark:border-slate-700">
         <div className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">

@@ -106,6 +106,29 @@ function ExistingReviewThread({
   // Resolved threads start collapsed (just the header); expand to read them on demand.
   const [expanded, setExpanded] = useState(!thread.isResolved);
   const [busy, setBusy] = useState(false);
+  const [replyOpen, setReplyOpen] = useState(false);
+  const [replyBody, setReplyBody] = useState('');
+  const [replyBusy, setReplyBusy] = useState(false);
+
+  // Replies target the thread's root comment id; a thread whose root has no numeric id
+  // can't be replied to, so the reply affordance hides.
+  const rootCommentId = thread.comments[0]?.id ?? null;
+
+  const sendReply = async () => {
+    if (!replyBody.trim() || rootCommentId === null) return;
+    setReplyBusy(true);
+    try {
+      await reviewApi.reply(rootCommentId, replyBody);
+      setReplyBody('');
+      setReplyOpen(false);
+      setStatus('Replied to thread');
+      onThreadsChange();
+    } catch (error) {
+      setStatus(`Reply failed: ${(error as Error).message}`);
+    } finally {
+      setReplyBusy(false);
+    }
+  };
 
   const toggleResolved = async () => {
     setBusy(true);
@@ -163,8 +186,9 @@ function ExistingReviewThread({
           {thread.isResolved ? 'Unresolve' : 'Resolve'}
         </button>
       </div>
-      {expanded
-        ? thread.comments.map((comment, index) => (
+      {expanded ? (
+        <>
+          {thread.comments.map((comment, index) => (
             <div
               key={comment.id ?? index}
               className={`text-slate-700 dark:text-slate-200 ${index > 0 ? 'mt-2 border-t border-slate-200 pt-2 dark:border-slate-700' : ''}`}
@@ -177,8 +201,51 @@ function ExistingReviewThread({
               </div>
               <div className="whitespace-pre-wrap break-words font-sans">{comment.body}</div>
             </div>
-          ))
-        : null}
+          ))}
+          {rootCommentId !== null ? (
+            <div className="mt-2 border-t border-slate-200 pt-2 dark:border-slate-700">
+              {replyOpen ? (
+                <div className="flex flex-col gap-1">
+                  <textarea
+                    value={replyBody}
+                    onChange={(event) => setReplyBody(event.target.value)}
+                    placeholder="Reply…"
+                    className="h-16 rounded border border-slate-300 p-2 text-sm dark:border-slate-700 dark:bg-slate-800 dark:text-slate-100"
+                  />
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={sendReply}
+                      disabled={!replyBody.trim() || replyBusy}
+                      className="rounded bg-slate-700 px-2 py-1 text-xs text-white disabled:opacity-40"
+                    >
+                      Reply
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setReplyOpen(false);
+                        setReplyBody('');
+                      }}
+                      className="rounded px-2 py-1 text-xs text-slate-500 hover:bg-slate-100 dark:text-slate-400 dark:hover:bg-slate-800"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => setReplyOpen(true)}
+                  className="text-xs text-slate-500 hover:underline dark:text-slate-400"
+                >
+                  Reply
+                </button>
+              )}
+            </div>
+          ) : null}
+        </>
+      ) : null}
     </div>
   );
 }
