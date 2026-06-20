@@ -3,6 +3,7 @@ import type {
   CommentScope,
   CommentSide,
   CommitInfo,
+  ExistingDiscussion,
   ReviewEvent,
   ReviewState,
   ReviewThread,
@@ -27,6 +28,9 @@ export interface AddCommentInput {
 
 export const reviewApi = {
   getPending: () => fetch('/api/review/pending').then((response) => asJson<ReviewState>(response)),
+
+  getExisting: () =>
+    fetch('/api/existing').then((response) => asJson<ExistingDiscussion>(response)),
 
   getChecks: () => fetch('/api/checks').then((response) => asJson<ChecksSummary>(response)),
 
