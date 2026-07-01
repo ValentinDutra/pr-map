@@ -15,7 +15,7 @@ const VIRTUALIZE_THRESHOLD = 200;
 // row is actually measured, so the estimate just needs to be close, not exact.
 const ESTIMATED_ROW_HEIGHT = 24;
 
-interface DiffLineMeta {
+export interface DiffLineMeta {
   oldLine: number | null;
   newLine: number | null;
 }
