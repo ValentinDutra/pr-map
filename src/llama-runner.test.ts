@@ -1,9 +1,12 @@
+import { EventEmitter } from 'node:events';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { createLocalChat, discoverModels } from './llama-runner.js';
-import { isOk } from './result.js';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RunningServer } from './llama-runner.js';
+import { createLlamaSpawner, createLocalChat, discoverModels } from './llama-runner.js';
+import type { LlmError, LlmProvider } from './llm-provider.js';
+import { type Result, err, isOk, ok } from './result.js';
 
 describe('discoverModels', () => {
   it('filters mmproj and non-gguf files, returning only real chat models', () => {
@@ -111,5 +114,397 @@ describe('listModels', () => {
     expect(isOk(result)).toBe(true);
     if (!isOk(result)) return;
     expect(result.value).toEqual([]);
+  });
+});
+
+describe('createLlamaSpawner', () => {
+  function createFakeChild() {
+    const emitter = new EventEmitter() as EventEmitter & { pid: number; kill: ReturnType<typeof vi.fn> };
+    emitter.pid = 12345;
+    emitter.kill = vi.fn();
+    return emitter;
+  }
+
+  it('resolves err with code llama_not_found when child emits ENOENT error', async () => {
+    const fakeChild = createFakeChild();
+    const spawn = vi.fn(() => {
+      setImmediate(() => fakeChild.emit('error', { code: 'ENOENT' }));
+      return fakeChild;
+    });
+
+    const spawnServer = createLlamaSpawner({
+      spawn: spawn as unknown as typeof import('node:child_process').spawn,
+      fetchFn: vi.fn(),
+      pickPort: async () => 9999,
+      readyTimeoutMs: 100,
+      pollIntervalMs: 10,
+    });
+
+    const result = await spawnServer('/path/to/model.gguf');
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('llama_not_found');
+    }
+  });
+
+  it('resolves ok with baseUrl and stop when health returns ok', async () => {
+    const fakeChild = createFakeChild();
+    const spawn = vi.fn(() => fakeChild);
+    const fetchFn = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ status: 'ok' }),
+    })) as unknown as typeof fetch;
+
+    const spawnServer = createLlamaSpawner({
+      spawn: spawn as unknown as typeof import('node:child_process').spawn,
+      fetchFn,
+      pickPort: async () => 8888,
+      readyTimeoutMs: 1000,
+      pollIntervalMs: 10,
+    });
+
+    const result = await spawnServer('/path/to/model.gguf');
+
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value.baseUrl).toBe('http://127.0.0.1:8888');
+      result.value.stop();
+      expect(fakeChild.kill).toHaveBeenCalled();
+    }
+  });
+
+  it('resolves err with code model_load_failed and kills child when health never returns ok', async () => {
+    const fakeChild = createFakeChild();
+    const spawn = vi.fn(() => fakeChild);
+    const fetchFn = vi.fn(async () => {
+      throw new Error('connection refused');
+    }) as unknown as typeof fetch;
+
+    const spawnServer = createLlamaSpawner({
+      spawn: spawn as unknown as typeof import('node:child_process').spawn,
+      fetchFn,
+      pickPort: async () => 7777,
+      readyTimeoutMs: 50,
+      pollIntervalMs: 10,
+    });
+
+    const result = await spawnServer('/path/to/model.gguf');
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('model_load_failed');
+    }
+    expect(fakeChild.kill).toHaveBeenCalled();
+  });
+
+  it('resolves err with code model_load_failed immediately when child exits early', async () => {
+    const fakeChild = createFakeChild();
+    const spawn = vi.fn(() => {
+      // Simulate child exiting early (e.g., bad GGUF path)
+      setImmediate(() => fakeChild.emit('exit', 1, null));
+      return fakeChild;
+    });
+    const fetchFn = vi.fn(async () => {
+      throw new Error('connection refused');
+    }) as unknown as typeof fetch;
+
+    const spawnServer = createLlamaSpawner({
+      spawn: spawn as unknown as typeof import('node:child_process').spawn,
+      fetchFn,
+      pickPort: async () => 6666,
+      readyTimeoutMs: 5000, // Long timeout - should NOT wait this long
+      pollIntervalMs: 10,
+    });
+
+    const startTime = Date.now();
+    const result = await spawnServer('/path/to/bad-model.gguf');
+    const elapsed = Date.now() - startTime;
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('model_load_failed');
+    }
+    // Should resolve quickly, not wait for readyTimeoutMs
+    expect(elapsed).toBeLessThan(500);
+  });
+
+  it('resolves err when pickPort rejects instead of throwing', async () => {
+    const spawnServer = createLlamaSpawner({
+      spawn: vi.fn() as unknown as typeof import('node:child_process').spawn,
+      fetchFn: vi.fn() as unknown as typeof fetch,
+      pickPort: async () => {
+        throw new Error('network error');
+      },
+      readyTimeoutMs: 100,
+      pollIntervalMs: 10,
+    });
+
+    const result = await spawnServer('/path/to/model.gguf');
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('model_load_failed');
+      expect(result.error.message).toContain('network error');
+    }
+  });
+});
+
+describe('ask/shutdown', () => {
+  function createFakeSpawnServer() {
+    const stopSpy = vi.fn();
+    const spawnServer = vi.fn(
+      async (_ggufPath: string): Promise<Result<RunningServer, LlmError>> => {
+        return ok({ baseUrl: 'http://127.0.0.1:9999', stop: stopSpy });
+      },
+    );
+    return { spawnServer, stopSpy };
+  }
+
+  function createFakeProvider(): LlmProvider {
+    return {
+      chat: async (messages) => ok(`reply:${messages.length}`),
+      complete: async () => ok(''),
+    };
+  }
+
+  it('concurrent asks for same model spawn server exactly once', async () => {
+    const { spawnServer, stopSpy } = createFakeSpawnServer();
+    const providerFor = vi.fn(() => createFakeProvider());
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor,
+    });
+
+    const [r1, r2] = await Promise.all([
+      localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'hi' }] }),
+      localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'hello' }] }),
+    ]);
+
+    expect(isOk(r1)).toBe(true);
+    expect(isOk(r2)).toBe(true);
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+    expect(stopSpy).not.toHaveBeenCalled();
+  });
+
+  it('swapping models stops the previous server before spawning the next', async () => {
+    const stop1 = vi.fn();
+    const stop2 = vi.fn();
+    let callCount = 0;
+    const spawnServer = vi.fn(async (): Promise<Result<RunningServer, LlmError>> => {
+      callCount++;
+      return ok({
+        baseUrl: `http://127.0.0.1:${9000 + callCount}`,
+        stop: callCount === 1 ? stop1 : stop2,
+      });
+    });
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'a' }] });
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+    expect(stop1).not.toHaveBeenCalled();
+
+    await localChat.ask({ model: 'm2.gguf', messages: [{ role: 'user', content: 'b' }] });
+    expect(spawnServer).toHaveBeenCalledTimes(2);
+    expect(stop1).toHaveBeenCalledTimes(1);
+    expect(stop2).not.toHaveBeenCalled();
+  });
+
+  it('returns the spawn error when spawnServer fails', async () => {
+    const spawnServer = vi.fn(
+      async (): Promise<Result<RunningServer, LlmError>> =>
+        err({ code: 'llama_not_found', message: 'not installed' }),
+    );
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const result = await localChat.ask({
+      model: 'm1.gguf',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('llama_not_found');
+    }
+  });
+
+  it('returns provider reply on success', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const result = await localChat.ask({
+      model: 'm1.gguf',
+      messages: [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }],
+    });
+
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value).toBe('reply:2');
+    }
+  });
+
+  it('shutdown stops the running server and is idempotent', async () => {
+    const { spawnServer, stopSpy } = createFakeSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'hi' }] });
+    expect(stopSpy).not.toHaveBeenCalled();
+
+    await localChat.shutdown();
+    expect(stopSpy).toHaveBeenCalledTimes(1);
+
+    await localChat.shutdown();
+    expect(stopSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not poison the mutex when spawnServer throws (subsequent asks succeed)', async () => {
+    let callCount = 0;
+    const spawnServer = vi.fn(async (): Promise<Result<RunningServer, LlmError>> => {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error('transient failure');
+      }
+      return ok({ baseUrl: 'http://127.0.0.1:9999', stop: vi.fn() });
+    });
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const r1 = await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'a' }] });
+    expect(isOk(r1)).toBe(false);
+
+    const r2 = await localChat.ask({ model: 'm2.gguf', messages: [{ role: 'user', content: 'b' }] });
+    expect(isOk(r2)).toBe(true);
+    expect(spawnServer).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not poison the mutex when provider.chat throws (subsequent asks succeed)', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    let chatCallCount = 0;
+    const providerFor = () => ({
+      chat: async () => {
+        chatCallCount++;
+        if (chatCallCount === 1) {
+          throw new Error('provider threw');
+        }
+        return ok('reply');
+      },
+      complete: async () => ok(''),
+    });
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor,
+    });
+
+    const r1 = await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'a' }] });
+    expect(isOk(r1)).toBe(false);
+
+    const r2 = await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'b' }] });
+    expect(isOk(r2)).toBe(true);
+    if (isOk(r2)) {
+      expect(r2.value).toBe('reply');
+    }
+  });
+
+  it('shutdown does not block behind an in-flight chat', async () => {
+    const stopSpy = vi.fn();
+    const spawnServer = vi.fn(
+      async (): Promise<Result<RunningServer, LlmError>> =>
+        ok({ baseUrl: 'http://127.0.0.1:9999', stop: stopSpy }),
+    );
+    const providerFor = () => ({
+      chat: async () => new Promise<never>(() => {}), // Never resolves
+      complete: async () => ok(''),
+    });
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor,
+    });
+
+    // Start an ask but don't await it - it will hang on chat()
+    const askPromise = localChat.ask({
+      model: 'm1.gguf',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    // Let ensure/spawn settle
+    await new Promise((r) => setImmediate(r));
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+
+    // shutdown() should resolve promptly, not wait behind the hung chat
+    const startTime = Date.now();
+    await localChat.shutdown();
+    const elapsed = Date.now() - startTime;
+
+    expect(elapsed).toBeLessThan(100);
+    expect(stopSpy).toHaveBeenCalledTimes(1);
+
+    // Clean up - the askPromise will never resolve, but that's fine for the test
+    void askPromise;
+  });
+
+  it('resets current when spawnServer throws during swap so same-model ask respawns', async () => {
+    const stop1 = vi.fn();
+    let callCount = 0;
+    const spawnServer = vi.fn(async (): Promise<Result<RunningServer, LlmError>> => {
+      callCount++;
+      if (callCount === 1) {
+        return ok({ baseUrl: 'http://127.0.0.1:9999', stop: stop1 });
+      }
+      if (callCount === 2) {
+        // Second call (swap to m2) throws
+        throw new Error('spawn failed during swap');
+      }
+      // Third call succeeds
+      return ok({ baseUrl: 'http://127.0.0.1:8888', stop: vi.fn() });
+    });
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    // First ask for m1 succeeds
+    const r1 = await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'a' }] });
+    expect(isOk(r1)).toBe(true);
+
+    // Second ask for m2 (swap) fails - spawnServer throws after stop1 was called
+    const r2 = await localChat.ask({ model: 'm2.gguf', messages: [{ role: 'user', content: 'b' }] });
+    expect(isOk(r2)).toBe(false);
+    expect(stop1).toHaveBeenCalledTimes(1);
+
+    // Third ask for m1 again - if current wasn't reset, this would reuse the dead m1 server
+    // Instead it should spawn a new server (callCount 3)
+    const r3 = await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'c' }] });
+    expect(spawnServer).toHaveBeenCalledTimes(3);
+    expect(isOk(r3)).toBe(true);
   });
 });

@@ -1,1 +1,1 @@
-[round 1] discoverModels root-level name must strip .gguf case-insensitively: basename(p).replace(/\.gguf$/i, ""), not basename(p, ".gguf") — the filter is case-insensitive so .GGUF at root kept its extension. Nested names use parent folder (unaffected).
+[round 1] shutdown() must be synchronous prompt stop (current?.server.stop(); current=null;), NOT chained on the mutex — else a mid-chat SIGTERM blocks graceful shutdown and orphans the llama-server child. Keep chat() inside the mutex. Also reset current=null in ask() catch on swap-time throw.

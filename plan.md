@@ -1,41 +1,49 @@
-# #56 — GET /api/ai/models lists on-disk GGUFs (mmproj filtered)
+# #57 — POST /api/ai/ask runs a local model end-to-end (spawn / swap / serialized)
 
 ## Goal
-Expose the local models a reviewer can ask about. Add a `LocalChat` module that discovers the
-`.gguf` files under a models directory and a `GET /api/ai/models` endpoint that returns them, so
-the upcoming popup's model dropdown (#60) has something to list and the whole feature has its
-first curl-able, user-observable slice. Depends on #55's `ModelInfo` type and `LlmError`.
+Make the reviewer able to actually ask a local model about code. Widen `LocalChat` with `ask`
+and `shutdown`: `ask({ model, messages })` idempotently ensures the right `llama-server` child
+is running for the chosen model, then proxies an OpenAI-compatible chat and returns the reply.
+Expose it as `POST /api/ai/ask`, mapping a missing `llama-server` to HTTP 503 so the eventual
+popup can say "install llama.cpp". Depends on #56's `LocalChat`/`listModels` and #55's `chat()`
+provider. This is the core of the whole feature.
 
 ## Approach
-A deep `LocalChat` module hides model discovery behind a small interface. Its discovery core is a
-pure function (`discoverModels`) testable with no disk; `listModels` does the real filesystem
-walk. The endpoint is thin wiring over `listModels`, mirroring the existing thin routers
-(`createChecksRouter`). `LocalChat` starts with only `listModels`; #57 widens it with `ask`/
-`shutdown`. Grounded in `src/review-endpoints.ts` (router + `wrap` pattern), `src/server.ts`
-(deps + mounting), `src/result.ts`, and #55's `src/types.ts` `ModelInfo`.
+A deep `LocalChat` hides the entire process lifecycle behind `ask`. The messy parts sit behind
+two INJECTED seams so the orchestration is unit-testable without a real binary or network:
+- `spawnServer(ggufPath) -> Result<{ baseUrl, stop }, LlmError>` — the real default spawns
+  `llama-server` and polls `/health`; tests inject a fake.
+- `providerFor(baseUrl) -> LlmProvider` — the real default is
+  `createOpenAiCompatibleProvider` pointed at the spawned server's `/v1`; tests inject a fake.
+Lifecycle transitions (start / swap) are SERIALIZED through a promise-chain mutex so concurrent
+asks can never spawn two servers. Empirically grounded: earlier this session `llama-server -m
+<gguf> --port <p> --host 127.0.0.1 --no-webui` was verified to load the user's models in 0–2s
+and answer via `/v1/chat/completions` with clean `choices[0].message.content`.
 
 ## Constraints
-- Do NOT implement `ask`, model spawning, `llama-server`, or the swap/serialization logic — those
-  are #57. `LocalChat` exposes ONLY `listModels` in this slice; no stub methods for future work.
-- Do NOT add any dashboard/frontend code — this slice is backend only.
-- A missing or unreadable models directory must return an EMPTY list, never a 500 or a throw
-  (stay in the Result world; fail soft).
-- Filter out `mmproj-*` files (vision projectors, e.g. `mmproj-model-f16.gguf`) — they are not
-  chat models.
-- Follow NodeNext `.js` import extensions and the Result pattern; no new runtime dependencies.
+- Do NOT add the orphan-safety PID hardening (writing the child PID into the SessionEnd-swept
+  dir) — that is #58. This slice does graceful `shutdown()` on SIGTERM/SIGINT only.
+- Do NOT add any dashboard/frontend code, and do NOT change `ChatMessage`/`ModelInfo` in
+  `src/types.ts` or the dashboard mirror. `ask` forwards the client's `messages` as-is; the
+  "be concise / help a reviewer" instruction is a CLIENT concern built with the code context in
+  #59 — no server-side system prompt in this slice.
+- Do NOT spawn a real `llama-server` in the automated test suite — unit-test the orchestration
+  and the spawner's error paths with INJECTED fakes (real behavior is proven by the e2e smoke in
+  the final task). This keeps the suite green without llama.cpp installed.
+- Keep `listModels` unchanged. `LocalChat` grows to `{ listModels, ask, shutdown }`.
+- Stay in the Result world (no throwing); follow NodeNext `.js` imports; no new runtime deps.
 
 ## Patterns to follow
-- Thin router + `wrap` async handler + Result-to-HTTP mapping: follow `createChecksRouter` in
-  `src/review-endpoints.ts` (copy the ~5-line local `wrap` helper into the new module — keep the
-  module self-contained rather than exporting `wrap`).
-- Router deps + mounting: follow how `src/server.ts` builds `ServerDeps` in `startServer` and
-  mounts routers with `app.use('/api/<name>', createXRouter(deps))` in `createApp` (mount the new
-  one BEFORE the `/api` catch-all 404).
-- Operation-style tests with real/injected dependencies (no supertest): follow
-  `src/review-endpoints.test.ts` (it tests operations directly). Pure-function tests: follow
-  `src/import-rules.test.ts` / `src/changed-symbols.test.ts`.
-- Result helpers (`ok`, `err`, `isOk`): `src/result.ts`. `ModelInfo`: `src/types.ts`. `LlmError`:
-  `src/llm-provider.ts`.
+- Dependency-injection with real defaults + fakes in tests: follow `src/gh-client.ts`
+  (injected `CommandExecutor`) and `src/build-graph.ts` (injected `GitGrep`/`ReadContent`), and
+  their tests `src/gh-client.test.ts` / `src/build-graph.test.ts`.
+- Provider usage: `createOpenAiCompatibleProvider(...).chat(messages)` from `src/llm-provider.ts`
+  (added in #55). `LlmError`/`LlmErrorCode` also there.
+- Result helpers (`ok`, `err`, `isOk`): `src/result.ts`. Retry helper if useful: `src/retry.ts`.
+- Router (`POST /ask`) + `wrap` + Result-to-HTTP mapping: follow the existing `createAiRouter`
+  in `src/ai-endpoints.ts` (it already has `wrap` and `GET /models`).
+- Fetch mocking in tests (for the spawner's health poll): `vi.stubGlobal`/injected `fetchFn`,
+  as in `src/llm-provider.test.ts`.
 
 ## Verification commands
 - Tests: `npm test`
@@ -43,44 +51,52 @@ walk. The endpoint is thin wiring over `listModels`, mirroring the existing thin
 - Type check: `npm run typecheck`
 
 ## Current state
-- `src/server.ts`: `createApp(deps: ServerDeps)` where `ServerDeps = { dataDir, ghClient, store }`;
-  routers mounted with `app.use('/api/review', createReviewRouter({...}))` etc., then a
-  `app.use('/api', ...)` JSON-404 catch-all. `startServer` builds the real `ghClient`/`store` and
-  calls `createApp`.
-- `src/review-endpoints.ts`: `createChecksRouter(deps): Router` = `Router()` + one
-  `router.get('/', wrap(async (_req, res) => { const r = await getChecks(...); isOk(r) ? res.json(r.value) : res.status(502).json({ error: r.error.message }) }))`. `wrap` is a small local
-  helper (not exported).
-- `src/types.ts` (from #55): `ModelInfo = { id: string; name: string; path: string }`.
-- `src/llm-provider.ts` (from #55): `LlmError = { code: LlmErrorCode; message: string }`.
-- The user's models live as `~/models/<model-folder>/<file>.gguf` (e.g.
-  `~/models/qwen2.5-coder-1.5b/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf`), plus a
-  `mmproj-model-f16.gguf` alongside gemma. Node is v25 (supports `readdir(dir, { recursive: true,
-  withFileTypes: true })`).
+- `src/llama-runner.ts`: `interface LocalChat { listModels(): Promise<Result<ModelInfo[],
+  LlmError>> }`; `createLocalChat({ modelsDir }): LocalChat` (only `listModels`); pure
+  `discoverModels`. Model `id` is the path relative to `modelsDir` (so `join(modelsDir, id)` is
+  the absolute `.gguf` path). `ModelInfo = { id, name, path }`.
+- `src/ai-endpoints.ts`: `createAiRouter({ localChat })` with a local `wrap` helper and
+  `router.get('/models', ...)`; mounted at `/api/ai` in `src/server.ts`.
+- `src/server.ts`: `ServerDeps = { dataDir, ghClient, store, localChat }`; `startServer` builds
+  `localChat = createLocalChat({ modelsDir: PRMAP_MODELS_DIR ?? ~/models })`;
+  `registerGracefulShutdown(server, pidFile)` handles SIGTERM/SIGINT → `server.close(() =>
+  process.exit(0))`.
+- `src/llm-provider.ts` (#55): `createOpenAiCompatibleProvider({ baseUrl, apiKey, model })` with
+  `chat(messages)`; `LlmError = { code: LlmErrorCode; message }`,
+  `LlmErrorCode = 'llama_not_found' | 'model_load_failed' | 'request_failed'`.
+- Verified this session: `llama-server` at `/opt/homebrew/bin`; health at `/health`
+  (`{"status":"ok"}`); OpenAI-compatible `/v1/chat/completions`.
 
 ## Desired end state
-- `src/llama-runner.ts` exports `interface LocalChat { listModels(): Promise<Result<ModelInfo[],
-  LlmError>> }` and `createLocalChat({ modelsDir }): LocalChat`.
-- `listModels()` recursively finds `*.gguf` under `modelsDir`, drops `mmproj-*`, returns
-  `ok(ModelInfo[])`; a missing/unreadable dir returns `ok([])`.
-- `GET /api/ai/models` returns `200 { models: ModelInfo[] }`; against a dir with one real `.gguf`
-  and one `mmproj-*.gguf` it returns only the real model.
-- `startServer` builds `LocalChat` from `PRMAP_MODELS_DIR` (default `~/models`) and the router is
-  mounted at `/api/ai`.
-- `npm test`, `npm run lint`, `npm run typecheck` all pass.
+- `LocalChat` is `{ listModels, ask, shutdown }`. `ask({ model, messages })` ensures the right
+  `llama-server` is running (start, or swap from a different model), then returns the model's
+  reply via the OpenAI-compatible provider; a missing `llama-server` binary yields
+  `err({ code: 'llama_not_found' })`, a ready-timeout `err({ code: 'model_load_failed' })`.
+- Lifecycle is serialized: concurrent `ask`s for the same model spawn exactly one server;
+  switching models tears the previous one down (never two live at once).
+- `POST /api/ai/ask` with `{ model, messages }` returns `{ reply }`; `llama_not_found` → HTTP
+  503 `{ error, code }`; other errors → 502 `{ error, code }`.
+- `startServer` calls `await localChat.shutdown()` on SIGTERM/SIGINT before exit; no `llama-server`
+  is left running after a graceful stop.
+- `npm test`, `npm run lint`, `npm run typecheck` pass; a manual e2e `ask` against `~/models`
+  returns a real answer.
 
 ## Edge cases and risks
-- Models are in SUBDIRECTORIES of the models dir, so discovery must recurse (not just read the top
-  level). Use `readdir(..., { recursive: true, withFileTypes: true })` and join `dirent.parentPath`
-  + `dirent.name`.
-- `mmproj-*` filtering is by basename; match case-insensitively and only real `.gguf` files.
-- A non-existent `modelsDir` (user has no `~/models`) is normal, not an error → `ok([])`.
-- `id` must be stable and unique per model (use the path relative to `modelsDir`); `name` should be
-  human-friendly (the parent folder name when nested, else the filename without `.gguf`).
+- Concurrency: two `ask` calls arriving together (fast follow-up, model-pick-then-ask) must not
+  each spawn a server — the mutex serializes `ensure`; a same-model concurrent pair reuses one.
+- Swap: starting model B must `stop()` model A's server first; assert at most one live server.
+- `llama-server` not on PATH: the child emits an `error` with `code === 'ENOENT'` — map to
+  `llama_not_found`, do not hang waiting for health.
+- Ready timeout / child exits early: return `model_load_failed` and `stop()` the child so nothing
+  leaks.
+- `ask` before any model / unknown model id: resolve `join(modelsDir, model)`; a bad path simply
+  fails to spawn → surfaces as an error Result (no throw).
+- Health poll must not run forever — bound it with a timeout and a poll interval.
 
 ## Tasks
 
-- [x] Add the pure model-discovery function. In a new `src/llama-runner.ts`, export `discoverModels(ggufPaths: string[], modelsDir: string): ModelInfo[]` — import `ModelInfo` from `./types.js`. For each path: keep only those ending in `.gguf` (case-insensitive) whose basename does NOT start with `mmproj` (case-insensitive); build `{ path, id, name }` where `path` is the given path, `id` is the path relative to `modelsDir` (use `node:path` `relative`), and `name` is the parent directory's basename when the file is nested under `modelsDir`, otherwise the filename without its `.gguf` extension. Pure — no filesystem access. Write `src/llama-runner.test.ts` following `src/changed-symbols.test.ts`: a `describe('discoverModels')` given a fixed list `[<modelsDir>/qwen3-4b/Qwen3-4B-Q4_K_M.gguf, <modelsDir>/gemma-3-4b/gemma-3-4b-it-Q4_K_M.gguf, <modelsDir>/gemma-3-4b/mmproj-model-f16.gguf, <modelsDir>/notes.txt]` returns exactly the two real models (mmproj and non-gguf dropped) with `name` = `qwen3-4b` / `gemma-3-4b` and the expected relative `id`s. Run `npm test`.
-- [x] Now that `discoverModels` exists, add the `LocalChat` module. In `src/llama-runner.ts`, export `interface LocalChat { listModels(): Promise<Result<ModelInfo[], LlmError>> }` (import `Result` from `./result.js`, `LlmError` from `./llm-provider.js`, `ModelInfo` from `./types.js`) and `createLocalChat(options: { modelsDir: string }): LocalChat`. Implement `listModels()`: `await readdir(options.modelsDir, { recursive: true, withFileTypes: true })` (from `node:fs/promises`), keep file dirents, build absolute paths by joining `dirent.parentPath` + `dirent.name`, pass them and `modelsDir` to `discoverModels`, and return `ok(models)`. Wrap the whole thing in try/catch — any error (including a non-existent dir, `ENOENT`) returns `ok([])`, never a throw or an `err`. Extend `src/llama-runner.test.ts` with a `describe('listModels')` that uses a real temp dir (`mkdtemp` from `node:fs/promises` in `os.tmpdir()`): create `<tmp>/m1/model-a-q4.gguf`, `<tmp>/m1/mmproj-model-f16.gguf`, and `<tmp>/empty-sub/` (no gguf); assert `createLocalChat({ modelsDir: tmp }).listModels()` resolves to `ok` containing exactly one model (`model-a-q4`'s folder → name `m1`), and that `createLocalChat({ modelsDir: join(tmp, 'does-not-exist') }).listModels()` resolves to `ok([])`. Clean up the temp dir in the test. Run `npm test` and `npm run typecheck`.
-- [x] Now that `createLocalChat`/`listModels` exists, expose it over HTTP and wire it in. Create `src/ai-endpoints.ts` exporting `interface AiRouterDeps { localChat: LocalChat }` (import `LocalChat` from `./llama-runner.js`) and `createAiRouter(deps: AiRouterDeps): Router` — copy the small local `wrap` async-handler helper from `src/review-endpoints.ts`, and add `router.get('/', wrap(async (_request, response) => { const result = await deps.localChat.listModels(); if (isOk(result)) { response.json({ models: result.value }); } else { response.status(500).json({ error: result.error.message }); } }))`. Then in `src/server.ts`: add `localChat: LocalChat` to `ServerDeps`; in `createApp`, mount `app.use('/api/ai', createAiRouter({ localChat: deps.localChat }))` BEFORE the `app.use('/api', ...)` 404 catch-all; in `startServer`, build `localChat: createLocalChat({ modelsDir: process.env.PRMAP_MODELS_DIR ?? join(homedir(), 'models') })` (import `homedir` from `node:os`, `createLocalChat` from `./llama-runner.js`, `createAiRouter` from `./ai-endpoints.js`) and pass it into the `createApp` deps. This is thin wiring mirroring `createChecksRouter`; the `listModels` behavior is already covered by task 2, so no new test is required — verify with `npm run typecheck`, `npm run lint`, and `npm test` (existing suite stays green).
+- [x] Add the `llama-server` spawner seam. In `src/llama-runner.ts`, export `interface RunningServer { baseUrl: string; stop: () => void }` and a factory `createLlamaSpawner(deps?: { spawn?: typeof import('node:child_process').spawn; fetchFn?: typeof fetch; pickPort?: () => Promise<number>; readyTimeoutMs?: number; pollIntervalMs?: number }): (ggufPath: string) => Promise<Result<RunningServer, LlmError>>`. Real defaults: `spawn` = `child_process.spawn`; `fetchFn` = global `fetch`; `pickPort` = a free-port finder using `node:net` (listen on 0, read `address().port`, close); `readyTimeoutMs` = 60000; `pollIntervalMs` = 300. Behavior: pick a port; `spawn('llama-server', ['-m', ggufPath, '--port', String(port), '--host', '127.0.0.1', '--no-webui'])`; if the child emits `error` with `code === 'ENOENT'` resolve `err({ code: 'llama_not_found', message })`; otherwise poll `http://127.0.0.1:<port>/health` via `fetchFn` until the JSON `status` is `ok` → resolve `ok({ baseUrl: 'http://127.0.0.1:<port>', stop: () => child.kill() })`; if not ready within `readyTimeoutMs`, `child.kill()` and resolve `err({ code: 'model_load_failed', message })`. Never throw. Write tests in `src/llama-runner.test.ts` (new `describe('createLlamaSpawner')`) injecting a FAKE `spawn` (returns a fake child: a small `EventEmitter` with a `kill` spy and a `pid`) and a FAKE `fetchFn` and a fixed `pickPort`, with a short `readyTimeoutMs`/`pollIntervalMs`: (a) fake child emits `error` `{ code:'ENOENT' }` → resolves `err` with `code:'llama_not_found'`; (b) `fetchFn` returns healthy (`{ ok:true, json:async()=>({status:'ok'}) }`) → resolves `ok`, `baseUrl` contains the fixed port, and calling `stop()` calls the child's `kill`; (c) `fetchFn` always unhealthy → resolves `err` `code:'model_load_failed'` and the child was `kill`ed. Run `npm test`.
+- [x] Now that the spawner exists, add `ask` + `shutdown` with serialized lifecycle. In `src/llama-runner.ts`, widen `interface LocalChat` to add `ask(request: { model: string; messages: ChatMessage[] }): Promise<Result<string, LlmError>>` and `shutdown(): Promise<void>` (import `ChatMessage` from `./types.js`, `LlmProvider`/`createOpenAiCompatibleProvider` from `./llm-provider.js`). Extend `createLocalChat` options to `{ modelsDir: string; spawnServer?: (ggufPath: string) => Promise<Result<RunningServer, LlmError>>; providerFor?: (baseUrl: string) => LlmProvider }` with defaults `spawnServer = createLlamaSpawner()` and `providerFor = (baseUrl) => createOpenAiCompatibleProvider({ baseUrl: baseUrl + '/v1', apiKey: 'sk-local', model: 'local' })`. Keep `listModels` as-is. Hold module state `let current: { model: string; server: RunningServer } | null = null` and a promise-chain mutex to SERIALIZE an internal `ensure(model)`: within the mutex, if `current?.model === model` reuse it (return `ok`); otherwise `current?.server.stop()`, `const r = await spawnServer(join(modelsDir, model))`, on `err` set `current = null` and return `r`, on `ok` set `current = { model, server: r.value }` and return `ok`. `ask({ model, messages })`: `const ensured = await ensure(model); if (!isOk(ensured)) return ensured; return providerFor(current!.server.baseUrl).chat(messages)` (forward messages unchanged — no system prompt here). `shutdown()`: `current?.server.stop(); current = null;` (idempotent, safe to call when never started). Extend `src/llama-runner.test.ts` with a `describe('ask/shutdown')` injecting a FAKE `spawnServer` (a `vi.fn` that records calls and returns `ok({ baseUrl:'http://x', stop: <spy> })`) and a FAKE `providerFor` (returns `{ chat: async (m) => ok('reply:'+m.length), complete: async()=>ok('') }`): (a) two `ask({model:'m1',...})` awaited concurrently (`Promise.all`) call `spawnServer` EXACTLY once; (b) `ask` m1 then `ask` m2 → the m1 server's `stop` spy was called and `spawnServer` called twice (swap, never two live — assert the m1 stop happened before/around m2 spawn); (c) a `spawnServer` that returns `err({code:'llama_not_found'})` makes `ask` return that same err; (d) the happy `ask` returns `ok` with the fake provider's reply; (e) `shutdown()` after a successful `ask` calls the server `stop` spy and a second `shutdown()` is a no-op. Run `npm test` and `npm run typecheck`.
+- [x] Now that `ask`/`shutdown` exist, expose the endpoint and wire graceful shutdown. In `src/ai-endpoints.ts` add `router.post('/ask', wrap(async (request, response) => { ... }))`: read `{ model, messages }` from `request.body` (Express JSON body parsing is already enabled in `server.ts`); if `model` is not a string or `messages` is not an array, respond `400 { error }`; else `const result = await deps.localChat.ask({ model, messages })`; on `isOk` → `response.json({ reply: result.value })`; on error, if `result.error.code === 'llama_not_found'` → `response.status(503).json({ error: result.error.message, code: result.error.code })`, otherwise `response.status(502).json({ error: result.error.message, code: result.error.code })`. In `src/server.ts`, make graceful shutdown also stop the model server: pass `deps.localChat` (or a `() => deps.localChat.shutdown()` callback) into `registerGracefulShutdown`, and in its `shutdown` handler `await deps.localChat.shutdown()` before `server.close(() => process.exit(0))` (guard so it still exits if shutdown throws). This router change is thin wiring over the task-2 `ask` (already unit-tested); verify with `npm run typecheck`, `npm run lint`, and `npm test` (existing suite stays green).
 - [x] Run full verification and fix any failures: `npm test`, `npm run lint`, `npm run typecheck`.
-- [x] Fix the case-sensitive extension strip in the root-level model name (found in review). In `src/llama-runner.ts`, the non-nested branch of `discoverModels` (currently `const name = isNested ? basename(parentDir) : basename(p, '.gguf');`) strips the extension case-sensitively while the file filter admits `.gguf` case-insensitively, so a root-level `Model-Q4.GGUF` keeps its extension in `name`. Replace the non-nested branch `basename(p, '.gguf')` with `basename(p).replace(/\.gguf$/i, '')` so uppercase/mixed-case `.GGUF` at the models-dir root yields a name without the extension (matching the filter and the spec "filename without its `.gguf` extension"). Nested behavior (name = parent folder) is unchanged. Add a case to the `describe('discoverModels')` test in `src/llama-runner.test.ts`: a ROOT-level path `<modelsDir>/Model-Q4.GGUF` (not nested, uppercase extension) produces `{ name: 'Model-Q4' }`. Run `npm test`.
+- [x] Fix graceful-shutdown blocking + swap-throw state (from review). PRIMARY (HIGH): in `src/llama-runner.ts`, `shutdown()` currently chains its `stop()` on the same `mutex` that `ask` holds while running the full `chat()` call, so a mid-chat SIGTERM blocks the unbounded `await localChat.shutdown()` in `src/server.ts` and the un-`detached` `llama-server` child is orphaned on force-kill. Replace the mutex-chained `shutdown()` with the SYNCHRONOUS form the plan specified (no mutex, no await): `async shutdown() { current?.server.stop(); current = null; }`. Do NOT move the `chat()` call out of the mutex in `ask` (that would reintroduce a swap-killing-an-in-flight-chat race) — only `shutdown()` changes. SECONDARY (LOW, defensive): in `ask`'s `catch` block, add `current = null;` so a throw from `spawnServer` during a swap does not leave `current` pointing at the already-stopped old server. Add a regression test in `src/llama-runner.test.ts` (`describe('ask/shutdown')`): inject a fake `spawnServer` returning `ok({ baseUrl, stop: <spy> })` and a fake `providerFor` whose `chat` returns a promise that NEVER resolves; start `ask({ model: 'm1', messages: [...] })` WITHOUT awaiting it, let the ensure/spawn settle (e.g. `await new Promise((r) => setImmediate(r))`), then `await localChat.shutdown()` and assert it resolves promptly AND the `stop` spy was called — proving shutdown does not wait behind the in-flight (hung) chat. Keep the existing shutdown tests (idempotent second call, stop after a normal ask) green. Run `npm test`.
