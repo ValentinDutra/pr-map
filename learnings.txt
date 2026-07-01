@@ -1,1 +1,0 @@
-[round 1] shutdown() must be synchronous prompt stop (current?.server.stop(); current=null;), NOT chained on the mutex — else a mid-chat SIGTERM blocks graceful shutdown and orphans the llama-server child. Keep chat() inside the mutex. Also reset current=null in ask() catch on swap-time throw.

@@ -1,102 +1,91 @@
-# #57 — POST /api/ai/ask runs a local model end-to-end (spawn / swap / serialized)
+# #59 — Frontend MVP: robot affordance + line-anchored ask popup (default model)
 
 ## Goal
-Make the reviewer able to actually ask a local model about code. Widen `LocalChat` with `ask`
-and `shutdown`: `ask({ model, messages })` idempotently ensures the right `llama-server` child
-is running for the chosen model, then proxies an OpenAI-compatible chat and returns the reply.
-Expose it as `POST /api/ai/ask`, mapping a missing `llama-server` to HTTP 503 so the eventual
-popup can say "install llama.cpp". Depends on #56's `LocalChat`/`listModels` and #55's `chat()`
-provider. This is the core of the whole feature.
+Let a reviewer select code in the diff, tap a robot in the gutter, ask a question, and get an
+answer from a local model — inline, in a small popup, without breaking keyboard nav. This is the
+smallest lovable end-to-end version of the feature, wired to the backend from #55–#57. Model
+dropdown is #60; cold-start/error-state polish is #61.
 
 ## Approach
-A deep `LocalChat` hides the entire process lifecycle behind `ask`. The messy parts sit behind
-two INJECTED seams so the orchestration is unit-testable without a real binary or network:
-- `spawnServer(ggufPath) -> Result<{ baseUrl, stop }, LlmError>` — the real default spawns
-  `llama-server` and polls `/health`; tests inject a fake.
-- `providerFor(baseUrl) -> LlmProvider` — the real default is
-  `createOpenAiCompatibleProvider` pointed at the spawned server's `/v1`; tests inject a fake.
-Lifecycle transitions (start / swap) are SERIALIZED through a promise-chain mutex so concurrent
-asks can never spawn two servers. Empirically grounded: earlier this session `llama-server -m
-<gguf> --port <p> --host 127.0.0.1 --no-webui` was verified to load the user's models in 0–2s
-and answer via `/v1/chat/completions` with clean `choices[0].message.content`.
+Match the repo convention: extract pure logic and unit-test it (`buildCodeContext`, popup
+`computeAnchorPosition`, the `shouldHandleReviewKey` guard); implement the React glue (robot
+button, `AiChatPopup`, portal, motion, focus, `aiApi`) as thin components verified by the
+dashboard build (`npm --prefix dashboard run build`, i.e. `tsc --noEmit && vite build`) against
+the concrete UI contract embedded in the tasks below. There is NO React component-test infra
+(no jsdom/Testing Library) and this slice does NOT add one — the dashboard tests
+(`use-review-keys.test.ts`, `suggestion.test.ts`) test pure functions only; follow that.
 
 ## Constraints
-- Do NOT add the orphan-safety PID hardening (writing the child PID into the SessionEnd-swept
-  dir) — that is #58. This slice does graceful `shutdown()` on SIGTERM/SIGINT only.
-- Do NOT add any dashboard/frontend code, and do NOT change `ChatMessage`/`ModelInfo` in
-  `src/types.ts` or the dashboard mirror. `ask` forwards the client's `messages` as-is; the
-  "be concise / help a reviewer" instruction is a CLIENT concern built with the code context in
-  #59 — no server-side system prompt in this slice.
-- Do NOT spawn a real `llama-server` in the automated test suite — unit-test the orchestration
-  and the spawner's error paths with INJECTED fakes (real behavior is proven by the e2e smoke in
-  the final task). This keeps the suite green without llama.cpp installed.
-- Keep `listModels` unchanged. `LocalChat` grows to `{ listModels, ask, shutdown }`.
-- Stay in the Result world (no throwing); follow NodeNext `.js` imports; no new runtime deps.
+- Do NOT add `@testing-library/react`, jsdom, or any component-test dependency. React
+  components are build-verified, not unit-tested; unit-test only the extracted pure functions.
+- Do NOT add the model dropdown (that is #60) — resolve a DEFAULT model via `GET /api/ai/models`
+  (prefer a model whose `name` contains "coder", else the first) and use it for `ask`.
+- Do NOT add the cold-start indicator or the styled amber/red error states (those are #61). The
+  MVP shows: idle → an instant user echo + a simple "Thinking…" indicator → the answer; a bare
+  failure may show a minimal inline "Request failed" line (no retry/copy affordances yet).
+- Do NOT change backend files (`src/**`) or the `/api/ai/*` contract. Frontend only under
+  `dashboard/src/**`.
+- At rest the diff must look BYTE-FOR-BYTE as today — the robot only appears on row hover / the
+  active-selection anchor row, exactly like the existing `+`.
+- Opening the popup must NOT open the inline comment editor (do not call `setTarget` on a cold
+  robot click; keep a separate lightweight anchor).
 
 ## Patterns to follow
-- Dependency-injection with real defaults + fakes in tests: follow `src/gh-client.ts`
-  (injected `CommandExecutor`) and `src/build-graph.ts` (injected `GitGrep`/`ReadContent`), and
-  their tests `src/gh-client.test.ts` / `src/build-graph.test.ts`.
-- Provider usage: `createOpenAiCompatibleProvider(...).chat(messages)` from `src/llm-provider.ts`
-  (added in #55). `LlmError`/`LlmErrorCode` also there.
-- Result helpers (`ok`, `err`, `isOk`): `src/result.ts`. Retry helper if useful: `src/retry.ts`.
-- Router (`POST /ask`) + `wrap` + Result-to-HTTP mapping: follow the existing `createAiRouter`
-  in `src/ai-endpoints.ts` (it already has `wrap` and `GET /models`).
-- Fetch mocking in tests (for the spawner's health poll): `vi.stubGlobal`/injected `fetchFn`,
-  as in `src/llm-provider.test.ts`.
+- Pure-function unit tests: `dashboard/src/use-review-keys.test.ts`, `dashboard/src/suggestion.test.ts`.
+- Reuse `currentLineContents(lines, lineMeta, startLine, line)` from `dashboard/src/suggestion.ts`
+  for the selected-line text.
+- Client: mirror `dashboard/src/review-api.ts` (`asJson` + `fetch` wrappers) for `aiApi`.
+- zustand store: `dashboard/src/store.ts` (small `create<...>()` stores).
+- Keyboard hook + `isTypingTarget`: `dashboard/src/use-review-keys.ts`.
+- Diff gutter + selection (`target`, `beginDrag`, the `w-6` action cell, `renderRow`): `dashboard/src/diff-view.tsx`.
+- Existing palette: AI = purple (`ai-suggestion-badge.tsx`), selection = amber, comment `+` = blue-on-hover, surfaces = slate; dark-mode `dark:` variants throughout.
 
 ## Verification commands
 - Tests: `npm test`
 - Lint: `npm run lint`
-- Type check: `npm run typecheck`
+- Type check / build: `npm --prefix dashboard run build`
 
 ## Current state
-- `src/llama-runner.ts`: `interface LocalChat { listModels(): Promise<Result<ModelInfo[],
-  LlmError>> }`; `createLocalChat({ modelsDir }): LocalChat` (only `listModels`); pure
-  `discoverModels`. Model `id` is the path relative to `modelsDir` (so `join(modelsDir, id)` is
-  the absolute `.gguf` path). `ModelInfo = { id, name, path }`.
-- `src/ai-endpoints.ts`: `createAiRouter({ localChat })` with a local `wrap` helper and
-  `router.get('/models', ...)`; mounted at `/api/ai` in `src/server.ts`.
-- `src/server.ts`: `ServerDeps = { dataDir, ghClient, store, localChat }`; `startServer` builds
-  `localChat = createLocalChat({ modelsDir: PRMAP_MODELS_DIR ?? ~/models })`;
-  `registerGracefulShutdown(server, pidFile)` handles SIGTERM/SIGINT → `server.close(() =>
-  process.exit(0))`.
-- `src/llm-provider.ts` (#55): `createOpenAiCompatibleProvider({ baseUrl, apiKey, model })` with
-  `chat(messages)`; `LlmError = { code: LlmErrorCode; message }`,
-  `LlmErrorCode = 'llama_not_found' | 'model_load_failed' | 'request_failed'`.
-- Verified this session: `llama-server` at `/opt/homebrew/bin`; health at `/health`
-  (`{"status":"ok"}`); OpenAI-compatible `/v1/chat/completions`.
+- `dashboard/src/diff-view.tsx`: `renderRow` builds each row; the `w-6` gutter cell holds the `+`
+  button (`onPointerDown={beginDrag}`) shown on hover. Selection state is `target: { startLine?;
+  line } | null`; `computeLineMeta(patch)` → `lineMeta`; `lines = patch.split('\n')`.
+- `dashboard/src/store.ts`: zustand `useSelection`, `usePanelTab`.
+- `dashboard/src/use-review-keys.ts`: `useReviewKeys({...})` adds a window `keydown` handler that
+  early-returns when `isTypingTarget(event.target)` (INPUT/TEXTAREA/SELECT); exports pure
+  `nextIndex`/`prevIndex`/`nextUnviewedIndex`.
+- `dashboard/src/review-api.ts`: `reviewApi` object of `fetch`-based methods via `asJson<T>`.
+- Backend (#55–#57): `GET /api/ai/models` → `{ models: {id,name,path}[] }`; `POST /api/ai/ask`
+  `{ model, messages }` → `{ reply }` (503 when llama.cpp missing).
+- `dashboard/src/index.css`: Tailwind v4 entry; no `--ease-out` token yet.
 
 ## Desired end state
-- `LocalChat` is `{ listModels, ask, shutdown }`. `ask({ model, messages })` ensures the right
-  `llama-server` is running (start, or swap from a different model), then returns the model's
-  reply via the OpenAI-compatible provider; a missing `llama-server` binary yields
-  `err({ code: 'llama_not_found' })`, a ready-timeout `err({ code: 'model_load_failed' })`.
-- Lifecycle is serialized: concurrent `ask`s for the same model spawn exactly one server;
-  switching models tears the previous one down (never two live at once).
-- `POST /api/ai/ask` with `{ model, messages }` returns `{ reply }`; `llama_not_found` → HTTP
-  503 `{ error, code }`; other errors → 502 `{ error, code }`.
-- `startServer` calls `await localChat.shutdown()` on SIGTERM/SIGINT before exit; no `llama-server`
-  is left running after a graceful stop.
-- `npm test`, `npm run lint`, `npm run typecheck` pass; a manual e2e `ask` against `~/models`
-  returns a real answer.
+- Hovering a commentable diff row shows the `+` AND a robot button in the gutter (purple on
+  hover), visually distinct; rest state unchanged. After a drag-select the robot stays visible on
+  the anchor row.
+- Clicking the robot opens a portaled, `position:fixed` `AiChatPopup` anchored to the row (below,
+  flipping above near the viewport bottom, clamped horizontally), scaling in ~170ms; it does not
+  open the comment editor.
+- The popup sends the selected code as context + the typed question to the default model and
+  renders the reply; follow-ups append (ephemeral). Enter sends; Shift+Enter newlines.
+- Escape, click-outside, or selecting a different line closes the popup and clears the
+  conversation; focus returns to the robot.
+- With the popup open, the global review shortcuts (`j/k/n/d/i/v/?`) do nothing.
+- `npm test`, `npm run lint`, `npm --prefix dashboard run build` all pass.
 
 ## Edge cases and risks
-- Concurrency: two `ask` calls arriving together (fast follow-up, model-pick-then-ask) must not
-  each spawn a server — the mutex serializes `ensure`; a same-model concurrent pair reuses one.
-- Swap: starting model B must `stop()` model A's server first; assert at most one live server.
-- `llama-server` not on PATH: the child emits an `error` with `code === 'ENOENT'` — map to
-  `llama_not_found`, do not hang waiting for health.
-- Ready timeout / child exits early: return `model_load_failed` and `stop()` the child so nothing
-  leaks.
-- `ask` before any model / unknown model id: resolve `join(modelsDir, model)`; a bad path simply
-  fails to spawn → surfaces as an error Result (no throw).
-- Health poll must not run forever — bound it with a timeout and a poll interval.
+- The diff scroll container is `overflow-auto` — the popup MUST be portaled to `document.body`
+  with `position:fixed`, or it gets clipped.
+- The virtualized diff (>~200 lines) unmounts the anchor row — capture the anchor rect at open
+  time; do not re-read it from a possibly-unmounted row.
+- Global shortcuts fire from non-input controls (the Send button) — the guard must suppress them
+  whenever the popup is open, not only when a text input is focused.
+- Two consecutive user turns are fine (the first user message carries the code context).
 
 ## Tasks
 
-- [x] Add the `llama-server` spawner seam. In `src/llama-runner.ts`, export `interface RunningServer { baseUrl: string; stop: () => void }` and a factory `createLlamaSpawner(deps?: { spawn?: typeof import('node:child_process').spawn; fetchFn?: typeof fetch; pickPort?: () => Promise<number>; readyTimeoutMs?: number; pollIntervalMs?: number }): (ggufPath: string) => Promise<Result<RunningServer, LlmError>>`. Real defaults: `spawn` = `child_process.spawn`; `fetchFn` = global `fetch`; `pickPort` = a free-port finder using `node:net` (listen on 0, read `address().port`, close); `readyTimeoutMs` = 60000; `pollIntervalMs` = 300. Behavior: pick a port; `spawn('llama-server', ['-m', ggufPath, '--port', String(port), '--host', '127.0.0.1', '--no-webui'])`; if the child emits `error` with `code === 'ENOENT'` resolve `err({ code: 'llama_not_found', message })`; otherwise poll `http://127.0.0.1:<port>/health` via `fetchFn` until the JSON `status` is `ok` → resolve `ok({ baseUrl: 'http://127.0.0.1:<port>', stop: () => child.kill() })`; if not ready within `readyTimeoutMs`, `child.kill()` and resolve `err({ code: 'model_load_failed', message })`. Never throw. Write tests in `src/llama-runner.test.ts` (new `describe('createLlamaSpawner')`) injecting a FAKE `spawn` (returns a fake child: a small `EventEmitter` with a `kill` spy and a `pid`) and a FAKE `fetchFn` and a fixed `pickPort`, with a short `readyTimeoutMs`/`pollIntervalMs`: (a) fake child emits `error` `{ code:'ENOENT' }` → resolves `err` with `code:'llama_not_found'`; (b) `fetchFn` returns healthy (`{ ok:true, json:async()=>({status:'ok'}) }`) → resolves `ok`, `baseUrl` contains the fixed port, and calling `stop()` calls the child's `kill`; (c) `fetchFn` always unhealthy → resolves `err` `code:'model_load_failed'` and the child was `kill`ed. Run `npm test`.
-- [x] Now that the spawner exists, add `ask` + `shutdown` with serialized lifecycle. In `src/llama-runner.ts`, widen `interface LocalChat` to add `ask(request: { model: string; messages: ChatMessage[] }): Promise<Result<string, LlmError>>` and `shutdown(): Promise<void>` (import `ChatMessage` from `./types.js`, `LlmProvider`/`createOpenAiCompatibleProvider` from `./llm-provider.js`). Extend `createLocalChat` options to `{ modelsDir: string; spawnServer?: (ggufPath: string) => Promise<Result<RunningServer, LlmError>>; providerFor?: (baseUrl: string) => LlmProvider }` with defaults `spawnServer = createLlamaSpawner()` and `providerFor = (baseUrl) => createOpenAiCompatibleProvider({ baseUrl: baseUrl + '/v1', apiKey: 'sk-local', model: 'local' })`. Keep `listModels` as-is. Hold module state `let current: { model: string; server: RunningServer } | null = null` and a promise-chain mutex to SERIALIZE an internal `ensure(model)`: within the mutex, if `current?.model === model` reuse it (return `ok`); otherwise `current?.server.stop()`, `const r = await spawnServer(join(modelsDir, model))`, on `err` set `current = null` and return `r`, on `ok` set `current = { model, server: r.value }` and return `ok`. `ask({ model, messages })`: `const ensured = await ensure(model); if (!isOk(ensured)) return ensured; return providerFor(current!.server.baseUrl).chat(messages)` (forward messages unchanged — no system prompt here). `shutdown()`: `current?.server.stop(); current = null;` (idempotent, safe to call when never started). Extend `src/llama-runner.test.ts` with a `describe('ask/shutdown')` injecting a FAKE `spawnServer` (a `vi.fn` that records calls and returns `ok({ baseUrl:'http://x', stop: <spy> })`) and a FAKE `providerFor` (returns `{ chat: async (m) => ok('reply:'+m.length), complete: async()=>ok('') }`): (a) two `ask({model:'m1',...})` awaited concurrently (`Promise.all`) call `spawnServer` EXACTLY once; (b) `ask` m1 then `ask` m2 → the m1 server's `stop` spy was called and `spawnServer` called twice (swap, never two live — assert the m1 stop happened before/around m2 spawn); (c) a `spawnServer` that returns `err({code:'llama_not_found'})` makes `ask` return that same err; (d) the happy `ask` returns `ok` with the fake provider's reply; (e) `shutdown()` after a successful `ask` calls the server `stop` spy and a second `shutdown()` is a no-op. Run `npm test` and `npm run typecheck`.
-- [x] Now that `ask`/`shutdown` exist, expose the endpoint and wire graceful shutdown. In `src/ai-endpoints.ts` add `router.post('/ask', wrap(async (request, response) => { ... }))`: read `{ model, messages }` from `request.body` (Express JSON body parsing is already enabled in `server.ts`); if `model` is not a string or `messages` is not an array, respond `400 { error }`; else `const result = await deps.localChat.ask({ model, messages })`; on `isOk` → `response.json({ reply: result.value })`; on error, if `result.error.code === 'llama_not_found'` → `response.status(503).json({ error: result.error.message, code: result.error.code })`, otherwise `response.status(502).json({ error: result.error.message, code: result.error.code })`. In `src/server.ts`, make graceful shutdown also stop the model server: pass `deps.localChat` (or a `() => deps.localChat.shutdown()` callback) into `registerGracefulShutdown`, and in its `shutdown` handler `await deps.localChat.shutdown()` before `server.close(() => process.exit(0))` (guard so it still exits if shutdown throws). This router change is thin wiring over the task-2 `ask` (already unit-tested); verify with `npm run typecheck`, `npm run lint`, and `npm test` (existing suite stays green).
-- [x] Run full verification and fix any failures: `npm test`, `npm run lint`, `npm run typecheck`.
-- [x] Fix graceful-shutdown blocking + swap-throw state (from review). PRIMARY (HIGH): in `src/llama-runner.ts`, `shutdown()` currently chains its `stop()` on the same `mutex` that `ask` holds while running the full `chat()` call, so a mid-chat SIGTERM blocks the unbounded `await localChat.shutdown()` in `src/server.ts` and the un-`detached` `llama-server` child is orphaned on force-kill. Replace the mutex-chained `shutdown()` with the SYNCHRONOUS form the plan specified (no mutex, no await): `async shutdown() { current?.server.stop(); current = null; }`. Do NOT move the `chat()` call out of the mutex in `ask` (that would reintroduce a swap-killing-an-in-flight-chat race) — only `shutdown()` changes. SECONDARY (LOW, defensive): in `ask`'s `catch` block, add `current = null;` so a throw from `spawnServer` during a swap does not leave `current` pointing at the already-stopped old server. Add a regression test in `src/llama-runner.test.ts` (`describe('ask/shutdown')`): inject a fake `spawnServer` returning `ok({ baseUrl, stop: <spy> })` and a fake `providerFor` whose `chat` returns a promise that NEVER resolves; start `ask({ model: 'm1', messages: [...] })` WITHOUT awaiting it, let the ensure/spawn settle (e.g. `await new Promise((r) => setImmediate(r))`), then `await localChat.shutdown()` and assert it resolves promptly AND the `stop` spy was called — proving shutdown does not wait behind the in-flight (hung) chat. Keep the existing shutdown tests (idempotent second call, stop after a normal ask) green. Run `npm test`.
+- [ ] Add the pure code-context builder. Create `dashboard/src/code-context.ts` exporting `buildCodeContext(lines: string[], lineMeta: DiffLineMeta[], target: { startLine?: number; line: number }, padding = 3): { code: string; label: string }`. Use `currentLineContents(lines, lineMeta, startLine, line)` (from `./suggestion`) to get the focus line text; also include up to `padding` context lines immediately before and after the focus range pulled from `lines`/`lineMeta` (by new-file line number), and MARK the focus line(s) so the model knows which lines the question is about (prefix focus lines with `> ` and context lines with `  `). `label` is a human string like `path` is unknown here so use the line range, e.g. `lines 40–48` or `line 42`. Export or import the `DiffLineMeta` type as needed (it is defined in `dashboard/src/diff-view.tsx`; if not exported, export it there and import it here — a type-only change). Write `dashboard/src/code-context.test.ts` following `dashboard/src/suggestion.test.ts`: given a small `patch`'s `lines`+`lineMeta` and a single-line `target`, assert the returned `code` marks the focus line with `> `, includes the surrounding context lines, and `label` reads `line N`; and for a range `target` assert `label` reads `lines A–B` and all focus lines are marked. Run `npm test`.
+- [ ] Add the pure popup-position calculator. In a new `dashboard/src/popup-position.ts`, export `computeAnchorPosition(anchor: { top: number; bottom: number; left: number }, viewport: { width: number; height: number }, size: { width: number; height: number }, gap = 6): { top: number; left: number; origin: 'top left' | 'bottom left' }`. Default places the popup BELOW the anchor: `top = anchor.bottom + gap`, `left` clamped to `[8, viewport.width - size.width - 8]`, `origin: 'top left'`. If `anchor.bottom + gap + size.height > viewport.height - 8`, place ABOVE: `top = anchor.top - size.height - gap`, same clamped `left`, `origin: 'bottom left'`. Write `dashboard/src/popup-position.test.ts`: (a) with room below → top is `anchor.bottom+gap`, origin `top left`; (b) near the viewport bottom → flips above, origin `bottom left`; (c) an anchor near the right edge → `left` is clamped so `left + size.width <= viewport.width - 8`. Run `npm test`.
+- [ ] Add the keyboard guard + AI-chat-open store. In `dashboard/src/use-review-keys.ts`, export a pure `shouldHandleReviewKey(target: EventTarget | null, isAiChatOpen: boolean): boolean` that returns `false` when `isAiChatOpen` is true OR `isTypingTarget(target)` is true, else `true`; refactor the window `keydown` handler to early-return unless `shouldHandleReviewKey(event.target, isAiChatOpen)` — take `isAiChatOpen` from a new dep on `ReviewKeysDeps` (default it to `false` for existing callers) OR read it from the store added next. In `dashboard/src/store.ts`, add `export const useAiChatOpen = create<{ open: boolean; setOpen: (open: boolean) => void }>((set) => ({ open: false, setOpen: (open) => set({ open }) }))`, and have `useReviewKeys` read `useAiChatOpen((s) => s.open)` to pass into the guard (so no caller change is required). Extend `dashboard/src/use-review-keys.test.ts` with a `describe('shouldHandleReviewKey')`: returns `false` when the popup is open (even for a non-input target like a `div`/`button`), `false` for an INPUT target, and `true` for a plain target when the popup is closed. Run `npm test`.
+- [ ] Add the AI chat client and the popup component (build-verified UI — no component test; verify with `npm --prefix dashboard run build`). Create `dashboard/src/chat-api.ts` mirroring `dashboard/src/review-api.ts`: `export const aiApi = { listModels: () => fetch('/api/ai/models').then(asJson<{ models: { id: string; name: string; path: string }[] }>), ask: (body: { model: string; messages: { role: 'user' | 'assistant'; content: string }[] }) => fetch('/api/ai/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(asJson<{ reply: string }>) }` (define a local `asJson` like review-api's). Create `dashboard/src/ask-popup.tsx` exporting `AiChatPopup(props: { anchorRect: { top: number; bottom: number; left: number }; scrollContainer: HTMLElement | null; contextCode: string; contextLabel: string; onClose: () => void })`: render via `createPortal(..., document.body)` with `position: fixed`, sized `w-[360px] max-h-[min(60vh,420px)]`, styled `rounded-md border border-slate-200 bg-white shadow-lg z-40 dark:border-slate-700 dark:bg-slate-900`, positioned with `computeAnchorPosition` (measure the popup via a ref/`useLayoutEffect`). SCROLL-FOLLOW (the container is `overflow-auto` and, when virtualized, the anchor row unmounts): capture the initial `anchorRect` and the container's `scrollTop` at open, and on `scrollContainer`'s `scroll` and window `resize`, recompute the base position from `computeAnchorPosition` using an anchor whose `top`/`bottom` are shifted by the scroll delta `-(scrollContainer.scrollTop - openScrollTop)`, then clamp to the viewport — the popup TRACKS the line and stays OPEN (never closes on scroll); if the anchor scrolls off, keep it pinned to the nearest clamped edge. Enter animation `opacity 0→1` + `scale(.96)→1` over 170ms with `transform-origin` from the position result, using `var(--ease-out)` (add `:root { --ease-out: cubic-bezier(0.23, 1, 0.32, 1); }` to `dashboard/src/index.css`); gate all motion behind `prefers-reduced-motion` (opacity only). Header: a `font-mono text-[11px] text-slate-500 dark:text-slate-400` context chip showing `contextLabel`, and a close `✕` (`text-slate-400 hover:text-slate-700 dark:hover:text-slate-200`). Conversation area (`flex-1 overflow-y-auto`): user turns `self-end rounded bg-slate-100 px-2 py-1 text-sm dark:bg-slate-800`, assistant turns `border-l-2 border-purple-300 bg-purple-50/50 px-2 py-1.5 text-sm dark:border-purple-700 dark:bg-purple-950/20`, auto-scroll to bottom. Composer: a growing `<textarea>` (Enter sends, Shift+Enter newlines, `onKeyDown` calls `event.stopPropagation()`), a send button (primary slate, `disabled` while awaiting). On first send resolve the default model with `aiApi.listModels()` (prefer a `name` containing "coder", else the first model's `id`); build `messages` as `[{ role:'user', content: `${contextCode}\n\nAnswer concisely.\nQuestion: ${question}` }, ...priorTurns]`, echo the user turn instantly, show a "Thinking…" indicator, call `aiApi.ask`, then append the assistant turn; on failure append a minimal `Request failed` line. Multi-turn follow-ups append to the same ephemeral `messages`. Escape (an `onKeyDown`/`keydown` listener that `stopPropagation`s and calls `onClose`) and a document `pointerdown` outside the portal node call `onClose`; move focus into the textarea on mount and return focus to the opener on unmount (accept an `onClose` that the caller uses to refocus the robot). Verify with `npm --prefix dashboard run build` (no unit test — no component-test infra).
+- [ ] Wire the robot affordance into the diff and open the popup (build-verified UI — verify with `npm --prefix dashboard run build`). In `dashboard/src/diff-view.tsx`, inside the `w-6` gutter action cell of `renderRow`, add a small robot button next to the `+`: a 14px inline `<svg>` (simple robot/sparkle, `currentColor`), `className` giving `opacity-0 group-hover:opacity-100` plus visible when this row is the active anchor (`target?.line === newLine`), resting `text-slate-400` and `hover:text-purple-600 dark:hover:text-purple-400`, `title="Ask a local model about this line"`. On click: `event.stopPropagation()`, capture the row's `getBoundingClientRect()` (as `{ top, bottom, left }`) and build `{ code, label } = buildCodeContext(lines, lineMeta, target ?? { line: newLine })`, set local state `aiChat = { anchorRect, code, label }` WITHOUT calling `setTarget` (so the comment editor stays closed), and set the store `useAiChatOpen.setOpen(true)`. Render `{aiChat && <AiChatPopup anchorRect={aiChat.anchorRect} scrollContainer={<the diff's overflow-auto scroll container element>} contextCode={aiChat.code} contextLabel={aiChat.label} onClose={() => { setAiChat(null); useAiChatOpen.getState().setOpen(false); }} />}` once per `DiffView` (not per row) — pass the scroll container the diff already uses for the windowed/virtualized list (via its existing ref's `.current`; if there is no single ref, add one to that `overflow-auto` wrapper, or pass `null` and let the popup fall back to window scroll). Closing on a different-line robot click replaces `aiChat` (clears the prior conversation because the popup remounts — give `AiChatPopup` a `key` tied to the anchor). Verify with `npm --prefix dashboard run build` and confirm at rest the gutter is unchanged (robot hidden until hover/anchor).
+- [ ] Run full verification and fix any failures: `npm test`, `npm run lint`, `npm --prefix dashboard run build`.
