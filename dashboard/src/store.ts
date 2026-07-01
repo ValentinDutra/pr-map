@@ -21,3 +21,13 @@ export const usePanelTab = create<PanelTabState>((set) => ({
   activeTab: 'diff',
   setTab: (tab) => set({ activeTab: tab }),
 }));
+
+interface AiChatOpenState {
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}
+
+export const useAiChatOpen = create<AiChatOpenState>((set) => ({
+  open: false,
+  setOpen: (open) => set({ open }),
+}));
