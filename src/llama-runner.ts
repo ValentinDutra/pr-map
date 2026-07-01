@@ -37,7 +37,7 @@ export function discoverModels(ggufPaths: string[], modelsDir: string): ModelInf
       const id = relative(modelsDir, p);
       const parentDir = dirname(p);
       const isNested = parentDir !== modelsDir;
-      const name = isNested ? basename(parentDir) : basename(p, '.gguf');
+      const name = isNested ? basename(parentDir) : basename(p).replace(/\.gguf$/i, '');
       return { id, name, path: p };
     });
 }

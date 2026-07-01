@@ -57,6 +57,21 @@ describe('discoverModels', () => {
     expect(models).toHaveLength(1);
     expect(models[0].name).toBe('vision');
   });
+
+  it('strips uppercase extension from root-level filename', () => {
+    const modelsDir = '/models';
+    const ggufPaths = [`${modelsDir}/Model-Q4.GGUF`];
+
+    const models = discoverModels(ggufPaths, modelsDir);
+
+    expect(models).toEqual([
+      {
+        id: 'Model-Q4.GGUF',
+        name: 'Model-Q4',
+        path: `${modelsDir}/Model-Q4.GGUF`,
+      },
+    ]);
+  });
 });
 
 describe('listModels', () => {
