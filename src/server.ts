@@ -105,10 +105,14 @@ function listen(app: Express, port: number): Promise<Server> {
 // Register handlers that stop accepting new connections, close the HTTP server, and exit 0
 // when the parent process signals shutdown (e.g. the SessionEnd cleanup hook sends SIGTERM).
 // A guard ensures the shutdown sequence runs only once even if multiple signals arrive.
-function registerGracefulShutdown(server: Server, pidFile: string): void {
+function registerGracefulShutdown(
+  server: Server,
+  pidFile: string,
+  shutdownLocalChat: () => Promise<void>,
+): void {
   let shuttingDown = false;
 
-  const shutdown = (signal: NodeJS.Signals): void => {
+  const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`pr-map dashboard shutting down (${signal})`);
@@ -117,11 +121,16 @@ function registerGracefulShutdown(server: Server, pidFile: string): void {
     } catch {
       // Best effort: the cleanup hook also removes stale PID files.
     }
+    try {
+      await shutdownLocalChat();
+    } catch {
+      // Best effort: model server stop should not block HTTP shutdown.
+    }
     server.close(() => process.exit(0));
   };
 
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
-    process.on(signal, () => shutdown(signal));
+    process.on(signal, () => void shutdown(signal));
   }
 }
 
@@ -130,12 +139,13 @@ export async function startServer(
   preferredPort = DEFAULT_PORT,
 ): Promise<number> {
   const prNumber = await readPrNumber(dataDir);
+  const localChat = createLocalChat({
+    modelsDir: process.env.PRMAP_MODELS_DIR ?? join(homedir(), 'models'),
+  });
   const app = createApp({
     dataDir,
     ghClient: createGhClient(createDefaultExecutor()),
-    localChat: createLocalChat({
-      modelsDir: process.env.PRMAP_MODELS_DIR ?? join(homedir(), 'models'),
-    }),
+    localChat,
     store: createFileReviewStore(dataDir, prNumber),
   });
 
@@ -144,7 +154,7 @@ export async function startServer(
     try {
       const server = await listen(app, port);
       const pidFile = join(PID_DIR, `${port}.pid`);
-      registerGracefulShutdown(server, pidFile);
+      registerGracefulShutdown(server, pidFile, () => localChat.shutdown());
       // Record the PID (one file per port) so the SessionEnd cleanup hook can find and kill it.
       try {
         mkdirSync(PID_DIR, { recursive: true });
