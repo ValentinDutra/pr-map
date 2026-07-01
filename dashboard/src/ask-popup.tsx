@@ -6,7 +6,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { aiApi, type ChatMessage } from './chat-api';
+import { aiApi } from './chat-api';
+import { buildOutgoingMessages, type ChatMessage } from './chat-messages';
 import { computeAnchorPosition } from './popup-position';
 
 interface AiChatPopupProps {
@@ -46,7 +47,6 @@ export function AiChatPopup({
   const [turns, setTurns] = useState<Turn[]>([]);
   const [pending, setPending] = useState(false);
   const initialAnchorRef = useRef(anchorRect);
-  const contextMessageRef = useRef<ChatMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [modelId, setModelId] = useState<string | null>(null);
   const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>([]);
@@ -163,24 +163,13 @@ export function AiChatPopup({
     setInput('');
     setError(null);
 
-    if (!contextMessageRef.current) {
-      contextMessageRef.current = {
-        role: 'user',
-        content: `${contextCode}\n\nAnswer concisely.\nQuestion: ${question}`,
-      };
-    }
-
     const userTurn: Turn = { role: 'user', content: question };
     setTurns((prev) => [...prev, userTurn]);
     setPending(true);
 
     try {
       const model = await resolveModel();
-      const isFirstMessage = conversationHistory.length === 0;
-      const newUserMessage: ChatMessage = isFirstMessage
-        ? contextMessageRef.current
-        : { role: 'user', content: question };
-      const messages: ChatMessage[] = [...conversationHistory, newUserMessage];
+      const messages = buildOutgoingMessages(conversationHistory, contextCode, question);
       const { reply } = await aiApi.ask({ model, messages });
       setConversationHistory([
         ...messages,
