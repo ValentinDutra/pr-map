@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import type { MutableRefObject, PointerEvent as ReactPointerEvent, ReactNode } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
+import { AiChatPopup } from './ask-popup';
+import { buildCodeContext } from './code-context';
 import { reviewApi } from './review-api';
 import { formatCommentTimestamp } from './format';
 import { buildSuggestionBlock, currentLineContents, hasSuggestionBlock } from './suggestion';
+import { useAiChatOpen } from './store';
 import { languageForPath, tokenizeCode, type SyntaxToken } from './syntax';
 import type { PendingComment, ReviewThread } from './types';
 
@@ -300,6 +303,15 @@ export function DiffView({
   // The in-progress click-drag over the new-file line numbers (GitHub-style range select).
   const [drag, setDrag] = useState<{ anchor: number; hover: number } | null>(null);
   const dragRef = useRef<{ anchor: number; hover: number } | null>(null);
+  // AI chat popup state: the anchor rect (captured at click time) plus the code context.
+  const [aiChat, setAiChat] = useState<{
+    anchorRect: { top: number; bottom: number; left: number };
+    code: string;
+    label: string;
+    anchorLine: number;
+  } | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const setAiChatOpen = useAiChatOpen((s) => s.setOpen);
 
   const lineComments = comments.filter((comment) => comment.scope === 'line');
   const fileComments = comments.filter((comment) => comment.scope === 'file');
@@ -438,16 +450,51 @@ export function DiffView({
           data-newline={newLine ?? ''}
           className={`flex ${lineBackground(text)} ${rangeBorders(newLine)}`}
         >
-          <span className="w-6 shrink-0 select-none border-r border-slate-100 text-center text-slate-400 dark:border-slate-800">
+          <span className="flex w-8 shrink-0 items-center justify-center gap-0.5 border-r border-slate-100 text-center text-slate-400 dark:border-slate-800">
             {commentable ? (
-              <button
-                type="button"
-                title="Click to comment, or drag to select multiple lines"
-                onPointerDown={(event) => beginDrag(newLine, event)}
-                className="cursor-pointer font-semibold text-slate-400 opacity-0 group-hover:opacity-100 hover:text-blue-600 dark:hover:text-blue-400"
-              >
-                +
-              </button>
+              <>
+                <button
+                  type="button"
+                  title="Click to comment, or drag to select multiple lines"
+                  onPointerDown={(event) => beginDrag(newLine, event)}
+                  className="cursor-pointer font-semibold text-slate-400 opacity-0 group-hover:opacity-100 hover:text-blue-600 dark:hover:text-blue-400"
+                >
+                  +
+                </button>
+                <button
+                  type="button"
+                  title="Ask a local model about this line"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    const row = (event.currentTarget as HTMLElement).closest<HTMLElement>('[data-newline]');
+                    if (!row) return;
+                    const rect = row.getBoundingClientRect();
+                    const anchorRect = { top: rect.top, bottom: rect.bottom, left: rect.left };
+                    const context = buildCodeContext(lines, lineMeta, target ?? { line: newLine });
+                    setAiChat({ anchorRect, code: context.code, label: context.label, anchorLine: newLine });
+                    setAiChatOpen(true);
+                  }}
+                  className={`cursor-pointer text-slate-400 hover:text-purple-600 dark:hover:text-purple-400 ${
+                    target?.line === newLine || aiChat?.anchorLine === newLine
+                      ? 'opacity-100'
+                      : 'opacity-0 group-hover:opacity-100'
+                  }`}
+                >
+                  <svg
+                    width="14"
+                    height="14"
+                    viewBox="0 0 16 16"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.5 3.5l1.5 1.5M11 11l1.5 1.5M3.5 12.5l1.5-1.5M11 5l1.5-1.5" />
+                    <circle cx="8" cy="8" r="2" />
+                  </svg>
+                </button>
+              </>
             ) : null}
           </span>
           <span className="w-12 shrink-0 select-none border-r border-slate-100 px-2 text-right text-slate-400 dark:border-slate-800 dark:text-slate-500">
@@ -584,9 +631,11 @@ export function DiffView({
           renderRow={renderRow}
           trackDrag={trackDrag}
           dragging={drag !== null}
+          scrollRef={scrollContainerRef}
         />
       ) : (
         <div
+          ref={scrollContainerRef}
           onPointerMove={trackDrag}
           className={`overflow-auto rounded-md border border-slate-200 font-mono text-[13px] leading-6 dark:border-slate-700 ${
             drag ? 'select-none' : ''
@@ -598,6 +647,20 @@ export function DiffView({
             </div>
           ))}
         </div>
+      )}
+
+      {aiChat && (
+        <AiChatPopup
+          key={aiChat.anchorLine}
+          anchorRect={aiChat.anchorRect}
+          scrollContainer={scrollContainerRef.current}
+          contextCode={aiChat.code}
+          contextLabel={aiChat.label}
+          onClose={() => {
+            setAiChat(null);
+            useAiChatOpen.getState().setOpen(false);
+          }}
+        />
       )}
     </div>
   );
@@ -612,13 +675,14 @@ function VirtualizedDiff({
   renderRow,
   trackDrag,
   dragging,
+  scrollRef,
 }: {
   rowCount: number;
   renderRow: (lineIndex: number) => ReactNode;
   trackDrag: (event: ReactPointerEvent) => void;
   dragging: boolean;
+  scrollRef: MutableRefObject<HTMLDivElement | null>;
 }) {
-  const scrollRef = useRef<HTMLDivElement | null>(null);
   const virtualizer = useVirtualizer({
     count: rowCount,
     getScrollElement: () => scrollRef.current,
