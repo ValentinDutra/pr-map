@@ -1,5 +1,6 @@
 import { type Result, ok, err, isOk } from './result.js';
 import { retry, type RetryOptions } from './retry.js';
+import type { ChatMessage } from './types.js';
 
 export type LlmErrorCode = 'llama_not_found' | 'model_load_failed' | 'request_failed';
 
@@ -9,8 +10,9 @@ export interface LlmError {
 }
 
 // A minimal completion interface so the enricher (and its tests) depend on an abstraction, not
-// a concrete HTTP client. `complete` returns the model's raw text for a single prompt.
+// a concrete HTTP client. `chat` is the primitive (multi-turn); `complete` delegates to it.
 export interface LlmProvider {
+  chat(messages: ChatMessage[]): Promise<Result<string, LlmError>>;
   complete(prompt: string): Promise<Result<string, LlmError>>;
 }
 
@@ -67,11 +69,11 @@ export function createOllamaProvider(options: OllamaOptions): LlmProvider {
   const retryOptions = options.retryOptions ?? DEFAULT_RETRY;
   const url = `${options.baseUrl.replace(/\/+$/, '')}/api/chat`;
   return {
-    complete(prompt) {
+    chat(messages) {
       return retry(async () => {
         const response = await postJson(
           url,
-          { model: options.model, stream: false, messages: [{ role: 'user', content: prompt }] },
+          { model: options.model, stream: false, messages },
           {},
           timeoutMs,
         );
@@ -82,6 +84,9 @@ export function createOllamaProvider(options: OllamaOptions): LlmProvider {
         }
         return ok(content);
       }, retryOptions);
+    },
+    complete(prompt) {
+      return this.chat([{ role: 'user', content: prompt }]);
     },
   };
 }
@@ -101,11 +106,11 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
   const retryOptions = options.retryOptions ?? DEFAULT_RETRY;
   const url = `${options.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   return {
-    complete(prompt) {
+    chat(messages) {
       return retry(async () => {
         const response = await postJson(
           url,
-          { model: options.model, messages: [{ role: 'user', content: prompt }] },
+          { model: options.model, messages },
           { Authorization: `Bearer ${options.apiKey}` },
           timeoutMs,
         );
@@ -118,6 +123,9 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
         }
         return ok(content);
       }, retryOptions);
+    },
+    complete(prompt) {
+      return this.chat([{ role: 'user', content: prompt }]);
     },
   };
 }

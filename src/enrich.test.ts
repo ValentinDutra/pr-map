@@ -42,7 +42,10 @@ const graph: PrGraph = {
 };
 
 function fixedProvider(response: Result<string, LlmError>): LlmProvider {
-  return { complete: () => Promise.resolve(response) };
+  return {
+    chat: () => Promise.resolve(response),
+    complete: () => Promise.resolve(response),
+  };
 }
 
 describe('buildPrompt', () => {
@@ -98,9 +101,12 @@ describe('enrichGraph', () => {
   it('only enriches changed (inPr) files', async () => {
     let calls = 0;
     const provider: LlmProvider = {
-      complete: () => {
+      chat: () => {
         calls += 1;
         return Promise.resolve(ok('{ "files": [] }'));
+      },
+      complete() {
+        return this.chat([]);
       },
     };
     await enrichGraph(graph, { provider });
