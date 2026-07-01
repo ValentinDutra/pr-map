@@ -19,7 +19,7 @@ export interface LlamaSpawnerDeps {
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
   writePid?: (pidFilePath: string, pid: number) => void;
-  removePid?: (pidFilePath: string) => void;
+  removePid?: (pidFilePath: string, expectedPid?: number) => void;
 }
 
 async function findFreePort(): Promise<number> {
@@ -69,11 +69,11 @@ export function createLlamaSpawner(
     }
 
     const pidFilePath = join(PID_DIR, `${port}-llama.pid`);
-    if (child.pid !== undefined) {
-      writePid(pidFilePath, child.pid);
+    const spawnedPid = child.pid;
+    if (spawnedPid !== undefined) {
+      writePid(pidFilePath, spawnedPid);
+      child.on('exit', () => removePid(pidFilePath, spawnedPid));
     }
-
-    child.on('exit', () => removePid(pidFilePath));
 
     return new Promise((resolve) => {
       let resolved = false;
@@ -106,7 +106,7 @@ export function createLlamaSpawner(
               const body = (await response.json()) as { status?: string };
               if (body.status === 'ok') {
                 resolved = true;
-                resolve(ok({ baseUrl, stop: () => { child.kill(); removePid(pidFilePath); } }));
+                resolve(ok({ baseUrl, stop: () => { child.kill(); if (spawnedPid !== undefined) removePid(pidFilePath, spawnedPid); } }));
                 return;
               }
             }

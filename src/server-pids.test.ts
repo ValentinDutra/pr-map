@@ -51,5 +51,26 @@ describe('server-pids', () => {
 
       expect(() => removePidFile(pidFile)).not.toThrow();
     });
+
+    it('deletes the file when expectedPid matches file content', () => {
+      const pidFile = join(tempDir, '789.pid');
+      writeFileSync(pidFile, '789');
+      expect(existsSync(pidFile)).toBe(true);
+
+      removePidFile(pidFile, 789);
+
+      expect(existsSync(pidFile)).toBe(false);
+    });
+
+    it('leaves the file in place when expectedPid differs from file content', () => {
+      const pidFile = join(tempDir, '111.pid');
+      writeFileSync(pidFile, '222');
+      expect(existsSync(pidFile)).toBe(true);
+
+      removePidFile(pidFile, 111);
+
+      expect(existsSync(pidFile)).toBe(true);
+      expect(readFileSync(pidFile, 'utf8')).toBe('222');
+    });
   });
 });
