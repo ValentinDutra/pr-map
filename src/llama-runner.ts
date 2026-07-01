@@ -2,9 +2,9 @@ import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { readdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
 import { basename, dirname, join, relative } from 'node:path';
-import type { LlmError } from './llm-provider.js';
-import { type Result, err, ok } from './result.js';
-import type { ModelInfo } from './types.js';
+import { type LlmError, type LlmProvider, createOpenAiCompatibleProvider } from './llm-provider.js';
+import { type Result, err, isOk, ok } from './result.js';
+import type { ChatMessage, ModelInfo } from './types.js';
 
 export interface RunningServer {
   baseUrl: string;
@@ -107,9 +107,48 @@ export function createLlamaSpawner(
 
 export interface LocalChat {
   listModels(): Promise<Result<ModelInfo[], LlmError>>;
+  ask(request: { model: string; messages: ChatMessage[] }): Promise<Result<string, LlmError>>;
+  shutdown(): Promise<void>;
 }
 
-export function createLocalChat(options: { modelsDir: string }): LocalChat {
+export interface LocalChatOptions {
+  modelsDir: string;
+  spawnServer?: (ggufPath: string) => Promise<Result<RunningServer, LlmError>>;
+  providerFor?: (baseUrl: string) => LlmProvider;
+}
+
+export function createLocalChat(options: LocalChatOptions): LocalChat {
+  const spawnServer = options.spawnServer ?? createLlamaSpawner();
+  const providerFor =
+    options.providerFor ??
+    ((baseUrl: string) =>
+      createOpenAiCompatibleProvider({
+        baseUrl: `${baseUrl}/v1`,
+        apiKey: 'sk-local',
+        model: 'local',
+      }));
+
+  let current: { model: string; server: RunningServer } | null = null;
+  let mutex: Promise<void> = Promise.resolve();
+
+  async function ensure(model: string): Promise<Result<void, LlmError>> {
+    if (current?.model === model) {
+      return ok(undefined);
+    }
+
+    current?.server.stop();
+
+    const ggufPath = join(options.modelsDir, model);
+    const result = await spawnServer(ggufPath);
+    if (!isOk(result)) {
+      current = null;
+      return result;
+    }
+
+    current = { model, server: result.value };
+    return ok(undefined);
+  }
+
   return {
     async listModels() {
       try {
@@ -121,6 +160,30 @@ export function createLocalChat(options: { modelsDir: string }): LocalChat {
       } catch {
         return ok([]);
       }
+    },
+
+    async ask(request) {
+      return new Promise((resolve) => {
+        mutex = mutex.then(async () => {
+          const ensured = await ensure(request.model);
+          if (!isOk(ensured)) {
+            resolve(ensured);
+            return;
+          }
+          const reply = await providerFor(current!.server.baseUrl).chat(request.messages);
+          resolve(reply);
+        });
+      });
+    },
+
+    async shutdown() {
+      return new Promise((resolve) => {
+        mutex = mutex.then(() => {
+          current?.server.stop();
+          current = null;
+          resolve();
+        });
+      });
     },
   };
 }

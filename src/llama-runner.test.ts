@@ -3,8 +3,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RunningServer } from './llama-runner.js';
 import { createLlamaSpawner, createLocalChat, discoverModels } from './llama-runner.js';
-import { isOk } from './result.js';
+import type { LlmError, LlmProvider } from './llm-provider.js';
+import { type Result, err, isOk, ok } from './result.js';
 
 describe('discoverModels', () => {
   it('filters mmproj and non-gguf files, returning only real chat models', () => {
@@ -194,5 +196,133 @@ describe('createLlamaSpawner', () => {
       expect(result.error.code).toBe('model_load_failed');
     }
     expect(fakeChild.kill).toHaveBeenCalled();
+  });
+});
+
+describe('ask/shutdown', () => {
+  function createFakeSpawnServer() {
+    const stopSpy = vi.fn();
+    const spawnServer = vi.fn(
+      async (_ggufPath: string): Promise<Result<RunningServer, LlmError>> => {
+        return ok({ baseUrl: 'http://127.0.0.1:9999', stop: stopSpy });
+      },
+    );
+    return { spawnServer, stopSpy };
+  }
+
+  function createFakeProvider(): LlmProvider {
+    return {
+      chat: async (messages) => ok(`reply:${messages.length}`),
+      complete: async () => ok(''),
+    };
+  }
+
+  it('concurrent asks for same model spawn server exactly once', async () => {
+    const { spawnServer, stopSpy } = createFakeSpawnServer();
+    const providerFor = vi.fn(() => createFakeProvider());
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor,
+    });
+
+    const [r1, r2] = await Promise.all([
+      localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'hi' }] }),
+      localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'hello' }] }),
+    ]);
+
+    expect(isOk(r1)).toBe(true);
+    expect(isOk(r2)).toBe(true);
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+    expect(stopSpy).not.toHaveBeenCalled();
+  });
+
+  it('swapping models stops the previous server before spawning the next', async () => {
+    const stop1 = vi.fn();
+    const stop2 = vi.fn();
+    let callCount = 0;
+    const spawnServer = vi.fn(async (): Promise<Result<RunningServer, LlmError>> => {
+      callCount++;
+      return ok({
+        baseUrl: `http://127.0.0.1:${9000 + callCount}`,
+        stop: callCount === 1 ? stop1 : stop2,
+      });
+    });
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'a' }] });
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+    expect(stop1).not.toHaveBeenCalled();
+
+    await localChat.ask({ model: 'm2.gguf', messages: [{ role: 'user', content: 'b' }] });
+    expect(spawnServer).toHaveBeenCalledTimes(2);
+    expect(stop1).toHaveBeenCalledTimes(1);
+    expect(stop2).not.toHaveBeenCalled();
+  });
+
+  it('returns the spawn error when spawnServer fails', async () => {
+    const spawnServer = vi.fn(
+      async (): Promise<Result<RunningServer, LlmError>> =>
+        err({ code: 'llama_not_found', message: 'not installed' }),
+    );
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const result = await localChat.ask({
+      model: 'm1.gguf',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('llama_not_found');
+    }
+  });
+
+  it('returns provider reply on success', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const result = await localChat.ask({
+      model: 'm1.gguf',
+      messages: [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }],
+    });
+
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      expect(result.value).toBe('reply:2');
+    }
+  });
+
+  it('shutdown stops the running server and is idempotent', async () => {
+    const { spawnServer, stopSpy } = createFakeSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'hi' }] });
+    expect(stopSpy).not.toHaveBeenCalled();
+
+    await localChat.shutdown();
+    expect(stopSpy).toHaveBeenCalledTimes(1);
+
+    await localChat.shutdown();
+    expect(stopSpy).toHaveBeenCalledTimes(1);
   });
 });
