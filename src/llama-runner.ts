@@ -71,6 +71,12 @@ export function createLlamaSpawner(
         }
       });
 
+      child.on('exit', (code) => {
+        if (resolved) return;
+        resolved = true;
+        resolve(err({ code: 'model_load_failed', message: `llama-server exited early with code ${code}` }));
+      });
+
       const baseUrl = `http://127.0.0.1:${port}`;
       const healthUrl = `${baseUrl}/health`;
       const startTime = Date.now();

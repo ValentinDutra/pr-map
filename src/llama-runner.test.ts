@@ -197,6 +197,37 @@ describe('createLlamaSpawner', () => {
     }
     expect(fakeChild.kill).toHaveBeenCalled();
   });
+
+  it('resolves err with code model_load_failed immediately when child exits early', async () => {
+    const fakeChild = createFakeChild();
+    const spawn = vi.fn(() => {
+      // Simulate child exiting early (e.g., bad GGUF path)
+      setImmediate(() => fakeChild.emit('exit', 1, null));
+      return fakeChild;
+    });
+    const fetchFn = vi.fn(async () => {
+      throw new Error('connection refused');
+    }) as unknown as typeof fetch;
+
+    const spawnServer = createLlamaSpawner({
+      spawn: spawn as unknown as typeof import('node:child_process').spawn,
+      fetchFn,
+      pickPort: async () => 6666,
+      readyTimeoutMs: 5000, // Long timeout - should NOT wait this long
+      pollIntervalMs: 10,
+    });
+
+    const startTime = Date.now();
+    const result = await spawnServer('/path/to/bad-model.gguf');
+    const elapsed = Date.now() - startTime;
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('model_load_failed');
+    }
+    // Should resolve quickly, not wait for readyTimeoutMs
+    expect(elapsed).toBeLessThan(500);
+  });
 });
 
 describe('ask/shutdown', () => {
