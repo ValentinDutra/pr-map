@@ -270,6 +270,7 @@ describe('createLlamaSpawner', () => {
     const fetchFn = vi.fn(async () => {
       throw new Error('connection refused');
     }) as unknown as typeof fetch;
+    const writePidCalls: Array<{ path: string; pid: number }> = [];
 
     const spawnServer = createLlamaSpawner({
       spawn: spawn as unknown as typeof import('node:child_process').spawn,
@@ -277,7 +278,7 @@ describe('createLlamaSpawner', () => {
       pickPort: async () => 7777,
       readyTimeoutMs: 50,
       pollIntervalMs: 10,
-      writePid: () => {},
+      writePid: (path, pid) => writePidCalls.push({ path, pid }),
       removePid: () => {},
     });
 
@@ -288,6 +289,11 @@ describe('createLlamaSpawner', () => {
       expect(result.error.code).toBe('model_load_failed');
     }
     expect(fakeChild.kill).toHaveBeenCalled();
+
+    // Prove pid file was written during cold-start (before health-ok)
+    expect(writePidCalls).toHaveLength(1);
+    expect(writePidCalls[0].path).toMatch(/7777-llama\.pid$/);
+    expect(writePidCalls[0].pid).toBe(12345);
   });
 
   it('resolves err with code model_load_failed immediately when child exits early', async () => {
