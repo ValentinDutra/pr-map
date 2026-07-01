@@ -148,3 +148,14 @@ export interface ChecksSummary {
   state: ChecksState;
   checks: CheckRun[];
 }
+
+export interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+export interface ModelInfo {
+  id: string;
+  name: string;
+  path: string;
+}

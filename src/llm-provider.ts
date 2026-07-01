@@ -1,13 +1,18 @@
 import { type Result, ok, err, isOk } from './result.js';
 import { retry, type RetryOptions } from './retry.js';
+import type { ChatMessage } from './types.js';
+
+export type LlmErrorCode = 'llama_not_found' | 'model_load_failed' | 'request_failed';
 
 export interface LlmError {
+  code: LlmErrorCode;
   message: string;
 }
 
 // A minimal completion interface so the enricher (and its tests) depend on an abstraction, not
-// a concrete HTTP client. `complete` returns the model's raw text for a single prompt.
+// a concrete HTTP client. `chat` is the primitive (multi-turn); `complete` delegates to it.
 export interface LlmProvider {
+  chat(messages: ChatMessage[]): Promise<Result<string, LlmError>>;
   complete(prompt: string): Promise<Result<string, LlmError>>;
 }
 
@@ -37,7 +42,7 @@ async function postJson(
     });
     if (!response.ok) {
       const text = await response.text().catch(() => '');
-      return err({ message: `${url} returned ${response.status}: ${text.slice(0, 200)}` });
+      return err({ code: 'request_failed', message: `${url} returned ${response.status}: ${text.slice(0, 200)}` });
     }
     return ok((await response.json()) as unknown);
   } catch (error) {
@@ -45,7 +50,7 @@ async function postJson(
       (error as Error).name === 'AbortError'
         ? `timed out after ${timeoutMs}ms`
         : (error as Error).message;
-    return err({ message: `request to ${url} failed: ${reason}` });
+    return err({ code: 'request_failed', message: `request to ${url} failed: ${reason}` });
   } finally {
     clearTimeout(timer);
   }
@@ -64,21 +69,24 @@ export function createOllamaProvider(options: OllamaOptions): LlmProvider {
   const retryOptions = options.retryOptions ?? DEFAULT_RETRY;
   const url = `${options.baseUrl.replace(/\/+$/, '')}/api/chat`;
   return {
-    complete(prompt) {
+    chat(messages) {
       return retry(async () => {
         const response = await postJson(
           url,
-          { model: options.model, stream: false, messages: [{ role: 'user', content: prompt }] },
+          { model: options.model, stream: false, messages },
           {},
           timeoutMs,
         );
         if (!isOk(response)) return response;
         const content = (response.value as { message?: { content?: string } }).message?.content;
         if (typeof content !== 'string') {
-          return err({ message: 'Ollama response had no message.content' });
+          return err({ code: 'request_failed', message: 'Ollama response had no message.content' });
         }
         return ok(content);
       }, retryOptions);
+    },
+    complete(prompt) {
+      return this.chat([{ role: 'user', content: prompt }]);
     },
   };
 }
@@ -98,11 +106,11 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
   const retryOptions = options.retryOptions ?? DEFAULT_RETRY;
   const url = `${options.baseUrl.replace(/\/+$/, '')}/chat/completions`;
   return {
-    complete(prompt) {
+    chat(messages) {
       return retry(async () => {
         const response = await postJson(
           url,
-          { model: options.model, messages: [{ role: 'user', content: prompt }] },
+          { model: options.model, messages },
           { Authorization: `Bearer ${options.apiKey}` },
           timeoutMs,
         );
@@ -111,10 +119,13 @@ export function createOpenAiCompatibleProvider(options: OpenAiCompatibleOptions)
           response.value as { choices?: { message?: { content?: string } }[] }
         ).choices?.[0]?.message?.content;
         if (typeof content !== 'string') {
-          return err({ message: 'OpenAI-compatible response had no choices[0].message.content' });
+          return err({ code: 'request_failed', message: 'OpenAI-compatible response had no choices[0].message.content' });
         }
         return ok(content);
       }, retryOptions);
+    },
+    complete(prompt) {
+      return this.chat([{ role: 'user', content: prompt }]);
     },
   };
 }
@@ -152,15 +163,17 @@ export function selectProvider(env: ProviderEnv): Result<LlmProvider, LlmError> 
   if (provider === 'openai-compatible') {
     if (!env.PRMAP_LLM_BASE_URL) {
       return err({
+        code: 'request_failed',
         message:
           'PRMAP_LLM_BASE_URL is required for the openai-compatible provider (e.g. https://api.openai.com/v1).',
       });
     }
     if (!env.PRMAP_LLM_API_KEY) {
-      return err({ message: 'PRMAP_LLM_API_KEY is required for the openai-compatible provider.' });
+      return err({ code: 'request_failed', message: 'PRMAP_LLM_API_KEY is required for the openai-compatible provider.' });
     }
     if (!env.PRMAP_LLM_MODEL) {
       return err({
+        code: 'request_failed',
         message: 'PRMAP_LLM_MODEL is required for the openai-compatible provider (e.g. gpt-4o-mini).',
       });
     }
@@ -175,6 +188,7 @@ export function selectProvider(env: ProviderEnv): Result<LlmProvider, LlmError> 
   }
 
   return err({
+    code: 'request_failed',
     message: `Unknown PRMAP_LLM_PROVIDER "${provider}". Use "ollama" or "openai-compatible".`,
   });
 }

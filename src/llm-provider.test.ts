@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { selectProvider } from './llm-provider.js';
+import { describe, it, expect, vi, afterEach } from 'vitest';
+import { selectProvider, createOllamaProvider, createOpenAiCompatibleProvider } from './llm-provider.js';
 import { isOk } from './result.js';
 
 describe('selectProvider', () => {
@@ -37,5 +37,90 @@ describe('selectProvider', () => {
     const result = selectProvider({ PRMAP_LLM_PROVIDER: 'banana' });
     expect(isOk(result)).toBe(false);
     if (!isOk(result)) expect(result.error.message).toContain('banana');
+  });
+
+  it('returns an error with code request_failed for unknown provider', () => {
+    const result = selectProvider({ PRMAP_LLM_PROVIDER: 'banana' });
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) expect(result.error.code).toBe('request_failed');
+  });
+});
+
+describe('createOllamaProvider chat', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('posts the messages array verbatim and returns the message content', async () => {
+    const messages = [
+      { role: 'user' as const, content: 'a' },
+      { role: 'assistant' as const, content: 'b' },
+      { role: 'user' as const, content: 'c' },
+    ];
+    let postedBody: unknown;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        postedBody = JSON.parse(init.body as string);
+        return new Response(JSON.stringify({ message: { content: 'reply' } }), { status: 200 });
+      }),
+    );
+
+    const provider = createOllamaProvider({ model: 'test-model', baseUrl: 'http://localhost:11434' });
+    const result = await provider.chat(messages);
+
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) expect(result.value).toBe('reply');
+    expect((postedBody as { messages: unknown }).messages).toEqual(messages);
+  });
+
+  it('complete delegates to chat with a single user message', async () => {
+    let postedBody: unknown;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        postedBody = JSON.parse(init.body as string);
+        return new Response(JSON.stringify({ message: { content: 'done' } }), { status: 200 });
+      }),
+    );
+
+    const provider = createOllamaProvider({ model: 'test-model', baseUrl: 'http://localhost:11434' });
+    const result = await provider.complete('hi');
+
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) expect(result.value).toBe('done');
+    expect((postedBody as { messages: unknown[] }).messages).toEqual([{ role: 'user', content: 'hi' }]);
+  });
+});
+
+describe('createOpenAiCompatibleProvider chat', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('posts the messages array verbatim with bearer header and returns choices content', async () => {
+    const messages = [
+      { role: 'user' as const, content: 'x' },
+      { role: 'assistant' as const, content: 'y' },
+      { role: 'user' as const, content: 'z' },
+    ];
+    let postedBody: unknown;
+    let capturedHeaders: Record<string, string> | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        postedBody = JSON.parse(init.body as string);
+        capturedHeaders = init.headers as Record<string, string>;
+        return new Response(JSON.stringify({ choices: [{ message: { content: 'answer' } }] }), { status: 200 });
+      }),
+    );
+
+    const provider = createOpenAiCompatibleProvider({
+      model: 'gpt-4o-mini',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+    });
+    const result = await provider.chat(messages);
+
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) expect(result.value).toBe('answer');
+    expect((postedBody as { messages: unknown }).messages).toEqual(messages);
+    expect((capturedHeaders as Record<string, string>).Authorization).toBe('Bearer sk-test');
   });
 });

@@ -42,7 +42,10 @@ const graph: PrGraph = {
 };
 
 function fixedProvider(response: Result<string, LlmError>): LlmProvider {
-  return { complete: () => Promise.resolve(response) };
+  return {
+    chat: () => Promise.resolve(response),
+    complete: () => Promise.resolve(response),
+  };
 }
 
 describe('buildPrompt', () => {
@@ -88,7 +91,7 @@ describe('enrichGraph', () => {
   it('fails open: a provider error yields no enrichment rather than throwing', async () => {
     const messages: string[] = [];
     const results = await enrichGraph(graph, {
-      provider: fixedProvider(err({ message: 'model down' })),
+      provider: fixedProvider(err({ code: 'request_failed', message: 'model down' })),
       log: (message) => messages.push(message),
     });
     expect(results).toEqual([]);
@@ -98,9 +101,12 @@ describe('enrichGraph', () => {
   it('only enriches changed (inPr) files', async () => {
     let calls = 0;
     const provider: LlmProvider = {
-      complete: () => {
+      chat: () => {
         calls += 1;
         return Promise.resolve(ok('{ "files": [] }'));
+      },
+      complete() {
+        return this.chat([]);
       },
     };
     await enrichGraph(graph, { provider });
@@ -135,7 +141,7 @@ describe('enrichGraph', () => {
   it('still fires onBatch for a failed batch, with no results (partial-results path)', async () => {
     const reported: number[] = [];
     await enrichGraph(graph, {
-      provider: fixedProvider(err({ message: 'down' })),
+      provider: fixedProvider(err({ code: 'request_failed', message: 'down' })),
       onBatch: (results) => {
         reported.push(results.length);
       },
