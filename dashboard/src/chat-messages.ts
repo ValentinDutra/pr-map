@@ -1,7 +1,6 @@
-export interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
+import type { ChatMessage } from './chat-api';
+
+export type { ChatMessage };
 
 export function buildOutgoingMessages(
   conversationHistory: ChatMessage[],

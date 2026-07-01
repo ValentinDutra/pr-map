@@ -450,7 +450,7 @@ export function DiffView({
           data-newline={newLine ?? ''}
           className={`flex ${lineBackground(text)} ${rangeBorders(newLine)}`}
         >
-          <span className="relative w-6 shrink-0 border-r border-slate-100 text-center text-slate-400 dark:border-slate-800">
+          <span className="relative w-6 shrink-0 select-none border-r border-slate-100 text-center text-slate-400 dark:border-slate-800">
             {commentable ? (
               <>
                 <button
