@@ -49,7 +49,12 @@ export function createLlamaSpawner(
   const pollIntervalMs = deps.pollIntervalMs ?? 300;
 
   return async (ggufPath: string): Promise<Result<RunningServer, LlmError>> => {
-    const port = await pickPort();
+    let port: number;
+    try {
+      port = await pickPort();
+    } catch (e) {
+      return err({ code: 'model_load_failed', message: `Failed to pick port: ${(e as Error).message}` });
+    }
 
     let child: ChildProcess;
     try {
@@ -171,13 +176,17 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
     async ask(request) {
       return new Promise((resolve) => {
         mutex = mutex.then(async () => {
-          const ensured = await ensure(request.model);
-          if (!isOk(ensured)) {
-            resolve(ensured);
-            return;
+          try {
+            const ensured = await ensure(request.model);
+            if (!isOk(ensured)) {
+              resolve(ensured);
+              return;
+            }
+            const reply = await providerFor(current!.server.baseUrl).chat(request.messages);
+            resolve(reply);
+          } catch (e) {
+            resolve(err({ code: 'request_failed', message: `ask failed: ${(e as Error).message}` }));
           }
-          const reply = await providerFor(current!.server.baseUrl).chat(request.messages);
-          resolve(reply);
         });
       });
     },
@@ -185,8 +194,12 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
     async shutdown() {
       return new Promise((resolve) => {
         mutex = mutex.then(() => {
-          current?.server.stop();
-          current = null;
+          try {
+            current?.server.stop();
+            current = null;
+          } catch {
+            current = null;
+          }
           resolve();
         });
       });

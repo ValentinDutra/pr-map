@@ -228,6 +228,26 @@ describe('createLlamaSpawner', () => {
     // Should resolve quickly, not wait for readyTimeoutMs
     expect(elapsed).toBeLessThan(500);
   });
+
+  it('resolves err when pickPort rejects instead of throwing', async () => {
+    const spawnServer = createLlamaSpawner({
+      spawn: vi.fn() as unknown as typeof import('node:child_process').spawn,
+      fetchFn: vi.fn() as unknown as typeof fetch,
+      pickPort: async () => {
+        throw new Error('network error');
+      },
+      readyTimeoutMs: 100,
+      pollIntervalMs: 10,
+    });
+
+    const result = await spawnServer('/path/to/model.gguf');
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('model_load_failed');
+      expect(result.error.message).toContain('network error');
+    }
+  });
 });
 
 describe('ask/shutdown', () => {
@@ -355,5 +375,59 @@ describe('ask/shutdown', () => {
 
     await localChat.shutdown();
     expect(stopSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not poison the mutex when spawnServer throws (subsequent asks succeed)', async () => {
+    let callCount = 0;
+    const spawnServer = vi.fn(async (): Promise<Result<RunningServer, LlmError>> => {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error('transient failure');
+      }
+      return ok({ baseUrl: 'http://127.0.0.1:9999', stop: vi.fn() });
+    });
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const r1 = await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'a' }] });
+    expect(isOk(r1)).toBe(false);
+
+    const r2 = await localChat.ask({ model: 'm2.gguf', messages: [{ role: 'user', content: 'b' }] });
+    expect(isOk(r2)).toBe(true);
+    expect(spawnServer).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not poison the mutex when provider.chat throws (subsequent asks succeed)', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    let chatCallCount = 0;
+    const providerFor = () => ({
+      chat: async () => {
+        chatCallCount++;
+        if (chatCallCount === 1) {
+          throw new Error('provider threw');
+        }
+        return ok('reply');
+      },
+      complete: async () => ok(''),
+    });
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor,
+    });
+
+    const r1 = await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'a' }] });
+    expect(isOk(r1)).toBe(false);
+
+    const r2 = await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'b' }] });
+    expect(isOk(r2)).toBe(true);
+    if (isOk(r2)) {
+      expect(r2.value).toBe('reply');
+    }
   });
 });
