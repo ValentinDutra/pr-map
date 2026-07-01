@@ -16,3 +16,9 @@ dashboard/dist/
 # Editor
 .vscode/
 .idea/
+
+# Autonomous run artifacts (ralph loop + /deliver reviewer). Ephemeral, not for the PR.
+.ralph-task.md
+learnings.txt
+review-notes.txt
+review-findings.md
