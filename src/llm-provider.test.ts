@@ -38,4 +38,10 @@ describe('selectProvider', () => {
     expect(isOk(result)).toBe(false);
     if (!isOk(result)) expect(result.error.message).toContain('banana');
   });
+
+  it('returns an error with code request_failed for unknown provider', () => {
+    const result = selectProvider({ PRMAP_LLM_PROVIDER: 'banana' });
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) expect(result.error.code).toBe('request_failed');
+  });
 });
