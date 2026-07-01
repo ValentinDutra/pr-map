@@ -43,6 +43,7 @@ export function AiChatPopup({
 
   const [input, setInput] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
+  const [modelMessages, setModelMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [modelId, setModelId] = useState<string | null>(null);
@@ -150,7 +151,7 @@ export function AiChatPopup({
     setError(null);
 
     const userContent =
-      turns.length === 0
+      modelMessages.length === 0
         ? `${contextCode}\n\nAnswer concisely.\nQuestion: ${question}`
         : question;
 
@@ -161,12 +162,11 @@ export function AiChatPopup({
     try {
       const model = await resolveModel();
       const messages: ChatMessage[] = [
-        ...(turns.length === 0
-          ? []
-          : turns.map((t) => ({ role: t.role, content: t.content }))),
+        ...modelMessages,
         { role: 'user', content: userContent },
       ];
       const { reply } = await aiApi.ask({ model, messages });
+      setModelMessages([...messages, { role: 'assistant', content: reply }]);
       setTurns((prev) => [...prev, { role: 'assistant', content: reply }]);
     } catch {
       setError('Request failed');
