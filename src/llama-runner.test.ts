@@ -1,5 +1,9 @@
-import { describe, expect, it } from 'vitest';
-import { discoverModels } from './llama-runner.js';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { createLocalChat, discoverModels } from './llama-runner.js';
+import { isOk } from './result.js';
 
 describe('discoverModels', () => {
   it('filters mmproj and non-gguf files, returning only real chat models', () => {
@@ -52,5 +56,45 @@ describe('discoverModels', () => {
 
     expect(models).toHaveLength(1);
     expect(models[0].name).toBe('vision');
+  });
+});
+
+describe('listModels', () => {
+  let tempDir: string;
+
+  beforeEach(async () => {
+    tempDir = await mkdtemp(join(tmpdir(), 'llama-runner-test-'));
+  });
+
+  afterEach(async () => {
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  it('discovers gguf files recursively and filters out mmproj', async () => {
+    await mkdir(join(tempDir, 'm1'), { recursive: true });
+    await mkdir(join(tempDir, 'empty-sub'), { recursive: true });
+    await writeFile(join(tempDir, 'm1', 'model-a-q4.gguf'), '');
+    await writeFile(join(tempDir, 'm1', 'mmproj-model-f16.gguf'), '');
+
+    const localChat = createLocalChat({ modelsDir: tempDir });
+    const result = await localChat.listModels();
+
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) return;
+    expect(result.value).toHaveLength(1);
+    expect(result.value[0]).toEqual({
+      id: 'm1/model-a-q4.gguf',
+      name: 'm1',
+      path: join(tempDir, 'm1', 'model-a-q4.gguf'),
+    });
+  });
+
+  it('returns ok([]) for a non-existent directory', async () => {
+    const localChat = createLocalChat({ modelsDir: join(tempDir, 'does-not-exist') });
+    const result = await localChat.listModels();
+
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) return;
+    expect(result.value).toEqual([]);
   });
 });

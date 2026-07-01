@@ -1,5 +1,28 @@
-import { basename, dirname, relative } from 'node:path';
+import { readdir } from 'node:fs/promises';
+import { basename, dirname, join, relative } from 'node:path';
+import type { LlmError } from './llm-provider.js';
+import { type Result, ok } from './result.js';
 import type { ModelInfo } from './types.js';
+
+export interface LocalChat {
+  listModels(): Promise<Result<ModelInfo[], LlmError>>;
+}
+
+export function createLocalChat(options: { modelsDir: string }): LocalChat {
+  return {
+    async listModels() {
+      try {
+        const dirents = await readdir(options.modelsDir, { recursive: true, withFileTypes: true });
+        const paths = dirents
+          .filter((d) => d.isFile())
+          .map((d) => join(d.parentPath, d.name));
+        return ok(discoverModels(paths, options.modelsDir));
+      } catch {
+        return ok([]);
+      }
+    },
+  };
+}
 
 export function discoverModels(ggufPaths: string[], modelsDir: string): ModelInfo[] {
   return ggufPaths
