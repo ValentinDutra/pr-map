@@ -450,7 +450,7 @@ export function DiffView({
           data-newline={newLine ?? ''}
           className={`flex ${lineBackground(text)} ${rangeBorders(newLine)}`}
         >
-          <span className="flex w-8 shrink-0 items-center justify-center gap-0.5 border-r border-slate-100 text-center text-slate-400 dark:border-slate-800">
+          <span className="relative w-6 shrink-0 border-r border-slate-100 text-center text-slate-400 dark:border-slate-800">
             {commentable ? (
               <>
                 <button
@@ -474,7 +474,7 @@ export function DiffView({
                     setAiChat({ anchorRect, code: context.code, label: context.label, anchorLine: newLine });
                     setAiChatOpen(true);
                   }}
-                  className={`cursor-pointer text-slate-400 hover:text-purple-600 dark:hover:text-purple-400 ${
+                  className={`absolute left-full top-1/2 z-10 ml-0.5 -translate-y-1/2 cursor-pointer text-slate-400 hover:text-purple-600 dark:hover:text-purple-400 ${
                     target?.line === newLine || aiChat?.anchorLine === newLine
                       ? 'opacity-100'
                       : 'opacity-0 group-hover:opacity-100'
