@@ -4,6 +4,7 @@ import { createServer } from 'node:net';
 import { basename, dirname, join, relative } from 'node:path';
 import { type LlmError, type LlmProvider, createOpenAiCompatibleProvider } from './llm-provider.js';
 import { type Result, err, isOk, ok } from './result.js';
+import { PID_DIR, removePidFile, writePidFile } from './server-pids.js';
 import type { ChatMessage, ModelInfo } from './types.js';
 
 export interface RunningServer {
@@ -17,6 +18,8 @@ export interface LlamaSpawnerDeps {
   pickPort?: () => Promise<number>;
   readyTimeoutMs?: number;
   pollIntervalMs?: number;
+  writePid?: (pidFilePath: string, pid: number) => void;
+  removePid?: (pidFilePath: string) => void;
 }
 
 async function findFreePort(): Promise<number> {
@@ -47,6 +50,8 @@ export function createLlamaSpawner(
   const pickPort = deps.pickPort ?? findFreePort;
   const readyTimeoutMs = deps.readyTimeoutMs ?? 60_000;
   const pollIntervalMs = deps.pollIntervalMs ?? 300;
+  const writePid = deps.writePid ?? writePidFile;
+  const removePid = deps.removePid ?? removePidFile;
 
   return async (ggufPath: string): Promise<Result<RunningServer, LlmError>> => {
     let port: number;
@@ -62,6 +67,13 @@ export function createLlamaSpawner(
     } catch (e) {
       return err({ code: 'llama_not_found', message: `Failed to spawn llama-server: ${(e as Error).message}` });
     }
+
+    const pidFilePath = join(PID_DIR, `${port}-llama.pid`);
+    if (child.pid !== undefined) {
+      writePid(pidFilePath, child.pid);
+    }
+
+    child.on('exit', () => removePid(pidFilePath));
 
     return new Promise((resolve) => {
       let resolved = false;
@@ -94,7 +106,7 @@ export function createLlamaSpawner(
               const body = (await response.json()) as { status?: string };
               if (body.status === 'ok') {
                 resolved = true;
-                resolve(ok({ baseUrl, stop: () => child.kill() }));
+                resolve(ok({ baseUrl, stop: () => { child.kill(); removePid(pidFilePath); } }));
                 return;
               }
             }

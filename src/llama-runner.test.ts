@@ -138,6 +138,8 @@ describe('createLlamaSpawner', () => {
       pickPort: async () => 9999,
       readyTimeoutMs: 100,
       pollIntervalMs: 10,
+      writePid: () => {},
+      removePid: () => {},
     });
 
     const result = await spawnServer('/path/to/model.gguf');
@@ -162,6 +164,8 @@ describe('createLlamaSpawner', () => {
       pickPort: async () => 8888,
       readyTimeoutMs: 1000,
       pollIntervalMs: 10,
+      writePid: () => {},
+      removePid: () => {},
     });
 
     const result = await spawnServer('/path/to/model.gguf');
@@ -171,6 +175,92 @@ describe('createLlamaSpawner', () => {
       expect(result.value.baseUrl).toBe('http://127.0.0.1:8888');
       result.value.stop();
       expect(fakeChild.kill).toHaveBeenCalled();
+    }
+  });
+
+  it('writes pid file immediately after spawn with path ending in port-llama.pid', async () => {
+    const fakeChild = createFakeChild();
+    const spawn = vi.fn(() => fakeChild);
+    const fetchFn = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ status: 'ok' }),
+    })) as unknown as typeof fetch;
+    const writePidCalls: Array<{ path: string; pid: number }> = [];
+
+    const spawnServer = createLlamaSpawner({
+      spawn: spawn as unknown as typeof import('node:child_process').spawn,
+      fetchFn,
+      pickPort: async () => 5555,
+      readyTimeoutMs: 1000,
+      pollIntervalMs: 10,
+      writePid: (path, pid) => writePidCalls.push({ path, pid }),
+      removePid: () => {},
+    });
+
+    await spawnServer('/path/to/model.gguf');
+
+    expect(writePidCalls).toHaveLength(1);
+    expect(writePidCalls[0].path).toMatch(/5555-llama\.pid$/);
+    expect(writePidCalls[0].pid).toBe(12345);
+  });
+
+  it('calls removePid when stop is invoked', async () => {
+    const fakeChild = createFakeChild();
+    const spawn = vi.fn(() => fakeChild);
+    const fetchFn = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ status: 'ok' }),
+    })) as unknown as typeof fetch;
+    const removePidCalls: string[] = [];
+    let writtenPath = '';
+
+    const spawnServer = createLlamaSpawner({
+      spawn: spawn as unknown as typeof import('node:child_process').spawn,
+      fetchFn,
+      pickPort: async () => 4444,
+      readyTimeoutMs: 1000,
+      pollIntervalMs: 10,
+      writePid: (path) => { writtenPath = path; },
+      removePid: (path) => removePidCalls.push(path),
+    });
+
+    const result = await spawnServer('/path/to/model.gguf');
+
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      result.value.stop();
+      expect(removePidCalls).toHaveLength(1);
+      expect(removePidCalls[0]).toBe(writtenPath);
+    }
+  });
+
+  it('calls removePid when child emits exit event', async () => {
+    const fakeChild = createFakeChild();
+    const spawn = vi.fn(() => fakeChild);
+    const fetchFn = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ status: 'ok' }),
+    })) as unknown as typeof fetch;
+    const removePidCalls: string[] = [];
+    let writtenPath = '';
+
+    const spawnServer = createLlamaSpawner({
+      spawn: spawn as unknown as typeof import('node:child_process').spawn,
+      fetchFn,
+      pickPort: async () => 3333,
+      readyTimeoutMs: 1000,
+      pollIntervalMs: 10,
+      writePid: (path) => { writtenPath = path; },
+      removePid: (path) => removePidCalls.push(path),
+    });
+
+    const result = await spawnServer('/path/to/model.gguf');
+
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      fakeChild.emit('exit', 0, null);
+      expect(removePidCalls).toHaveLength(1);
+      expect(removePidCalls[0]).toBe(writtenPath);
     }
   });
 
@@ -187,6 +277,8 @@ describe('createLlamaSpawner', () => {
       pickPort: async () => 7777,
       readyTimeoutMs: 50,
       pollIntervalMs: 10,
+      writePid: () => {},
+      removePid: () => {},
     });
 
     const result = await spawnServer('/path/to/model.gguf');
@@ -215,6 +307,8 @@ describe('createLlamaSpawner', () => {
       pickPort: async () => 6666,
       readyTimeoutMs: 5000, // Long timeout - should NOT wait this long
       pollIntervalMs: 10,
+      writePid: () => {},
+      removePid: () => {},
     });
 
     const startTime = Date.now();
@@ -238,6 +332,8 @@ describe('createLlamaSpawner', () => {
       },
       readyTimeoutMs: 100,
       pollIntervalMs: 10,
+      writePid: () => {},
+      removePid: () => {},
     });
 
     const result = await spawnServer('/path/to/model.gguf');
