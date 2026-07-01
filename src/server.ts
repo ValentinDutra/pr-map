@@ -2,11 +2,13 @@ import express, { type Express } from 'express';
 import type { Server } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import openBrowser from 'open';
+import { createAiRouter } from './ai-endpoints.js';
 import { createGhClient, createDefaultExecutor, type GhClient } from './gh-client.js';
+import { createLocalChat, type LocalChat } from './llama-runner.js';
 import {
   createReviewRouter,
   createExistingRouter,
@@ -39,6 +41,7 @@ const DASHBOARD_DIST = resolveDashboardDist();
 export interface ServerDeps {
   dataDir: string;
   ghClient: GhClient;
+  localChat: LocalChat;
   store: ReviewStore;
 }
 
@@ -60,6 +63,7 @@ export function createApp(deps: ServerDeps): Express {
   app.use('/api/checks', createChecksRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use('/api/commits', createCommitsRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use('/api/threads', createThreadsRouter({ ghClient: deps.ghClient, store: deps.store }));
+  app.use('/api/ai', createAiRouter({ localChat: deps.localChat }));
 
   // Any unmatched /api/* path returns JSON 404 instead of falling through to the SPA HTML.
   app.use('/api', (_request, response) => {
@@ -129,6 +133,9 @@ export async function startServer(
   const app = createApp({
     dataDir,
     ghClient: createGhClient(createDefaultExecutor()),
+    localChat: createLocalChat({
+      modelsDir: process.env.PRMAP_MODELS_DIR ?? join(homedir(), 'models'),
+    }),
     store: createFileReviewStore(dataDir, prNumber),
   });
 
