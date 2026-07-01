@@ -24,11 +24,12 @@ interface Turn {
 
 export function AiChatPopup({
   anchorRect,
-  scrollContainer,
+  scrollContainer: _scrollContainer,
   contextCode,
   contextLabel,
   onClose,
 }: AiChatPopupProps) {
+  void _scrollContainer;
   const popupRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const openerRef = useRef<Element | null>(null);
@@ -43,24 +44,26 @@ export function AiChatPopup({
 
   const [input, setInput] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
-  const [modelMessages, setModelMessages] = useState<ChatMessage[]>([]);
   const [pending, setPending] = useState(false);
+  const initialAnchorRef = useRef(anchorRect);
+  const contextMessageRef = useRef<ChatMessage | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [modelId, setModelId] = useState<string | null>(null);
+  const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>([]);
 
   const [mounted, setMounted] = useState(false);
-  const [openScrollTop, setOpenScrollTop] = useState(0);
+  const scrollDeltaRef = useRef(0);
+  const lastScrollTopsRef = useRef(new Map<EventTarget, number>());
 
   useEffect(() => {
     openerRef.current = document.activeElement;
-    setOpenScrollTop(scrollContainer?.scrollTop ?? 0);
     requestAnimationFrame(() => setMounted(true));
     return () => {
       if (openerRef.current instanceof HTMLElement) {
         openerRef.current.focus();
       }
     };
-  }, [scrollContainer]);
+  }, []);
 
   useEffect(() => {
     if (mounted && textareaRef.current) {
@@ -74,37 +77,47 @@ export function AiChatPopup({
     setSize({ width: rect.width, height: rect.height });
   }, [turns, pending, error]);
 
-  const computePosition = (scrollDelta: number) => {
+  const computePositionWithDelta = () => {
     const adjustedAnchor = {
-      top: anchorRect.top - scrollDelta,
-      bottom: anchorRect.bottom - scrollDelta,
-      left: anchorRect.left,
+      top: initialAnchorRef.current.top - scrollDeltaRef.current,
+      bottom: initialAnchorRef.current.bottom - scrollDeltaRef.current,
+      left: initialAnchorRef.current.left,
     };
     const viewport = { width: window.innerWidth, height: window.innerHeight };
     return computeAnchorPosition(adjustedAnchor, viewport, size);
   };
 
   useLayoutEffect(() => {
-    const scrollDelta = (scrollContainer?.scrollTop ?? 0) - openScrollTop;
-    setPosition(computePosition(scrollDelta));
-  }, [anchorRect, size, openScrollTop, scrollContainer]);
+    setPosition(computePositionWithDelta());
+  }, [anchorRect, size]);
 
   useEffect(() => {
-    const handleScroll = () => {
-      const scrollDelta = (scrollContainer?.scrollTop ?? 0) - openScrollTop;
-      setPosition(computePosition(scrollDelta));
+    const handleScroll = (event: Event) => {
+      const target = event.target;
+      if (!target) return;
+      if (target instanceof Element && popupRef.current?.contains(target)) return;
+      const scrollTop =
+        target === document || target === document.documentElement
+          ? window.scrollY
+          : target instanceof HTMLElement
+            ? target.scrollTop
+            : 0;
+      const lastTop = lastScrollTopsRef.current.get(target) ?? scrollTop;
+      const delta = scrollTop - lastTop;
+      lastScrollTopsRef.current.set(target, scrollTop);
+      if (delta !== 0) {
+        scrollDeltaRef.current += delta;
+        setPosition(computePositionWithDelta());
+      }
     };
-    const handleResize = () => {
-      const scrollDelta = (scrollContainer?.scrollTop ?? 0) - openScrollTop;
-      setPosition(computePosition(scrollDelta));
-    };
-    scrollContainer?.addEventListener('scroll', handleScroll);
+    const handleResize = () => setPosition(computePositionWithDelta());
+    document.addEventListener('scroll', handleScroll, true);
     window.addEventListener('resize', handleResize);
     return () => {
-      scrollContainer?.removeEventListener('scroll', handleScroll);
+      document.removeEventListener('scroll', handleScroll, true);
       window.removeEventListener('resize', handleResize);
     };
-  }, [scrollContainer, openScrollTop, anchorRect, size]);
+  }, [size]);
 
   useEffect(() => {
     if (conversationRef.current) {
@@ -150,10 +163,12 @@ export function AiChatPopup({
     setInput('');
     setError(null);
 
-    const userContent =
-      modelMessages.length === 0
-        ? `${contextCode}\n\nAnswer concisely.\nQuestion: ${question}`
-        : question;
+    if (!contextMessageRef.current) {
+      contextMessageRef.current = {
+        role: 'user',
+        content: `${contextCode}\n\nAnswer concisely.\nQuestion: ${question}`,
+      };
+    }
 
     const userTurn: Turn = { role: 'user', content: question };
     setTurns((prev) => [...prev, userTurn]);
@@ -161,12 +176,16 @@ export function AiChatPopup({
 
     try {
       const model = await resolveModel();
-      const messages: ChatMessage[] = [
-        ...modelMessages,
-        { role: 'user', content: userContent },
-      ];
+      const isFirstMessage = conversationHistory.length === 0;
+      const newUserMessage: ChatMessage = isFirstMessage
+        ? contextMessageRef.current
+        : { role: 'user', content: question };
+      const messages: ChatMessage[] = [...conversationHistory, newUserMessage];
       const { reply } = await aiApi.ask({ model, messages });
-      setModelMessages([...messages, { role: 'assistant', content: reply }]);
+      setConversationHistory([
+        ...messages,
+        { role: 'assistant', content: reply },
+      ]);
       setTurns((prev) => [...prev, { role: 'assistant', content: reply }]);
     } catch {
       setError('Request failed');
