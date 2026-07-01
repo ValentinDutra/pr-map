@@ -1,44 +1,48 @@
-# #59 — Frontend MVP: robot affordance + line-anchored ask popup (default model)
+# #58 — Orphan-safety: no stray llama-server after a hard kill
 
 ## Goal
-Let a reviewer select code in the diff, tap a robot in the gutter, ask a question, and get an
-answer from a local model — inline, in a small popup, without breaking keyboard nav. This is the
-smallest lovable end-to-end version of the feature, wired to the backend from #55–#57. Model
-dropdown is #60; cold-start/error-state polish is #61.
+When `ask` spawns a `llama-server` child, record its PID in the same `pr-map-server-pids`
+directory the SessionEnd cleanup hook already sweeps, so that even a `kill -9` of the node
+dashboard process (bypassing graceful shutdown) leaves no orphaned `llama-server` consuming
+RAM/GPU. The PID file is removed on graceful `shutdown()` and when the child exits.
 
 ## Approach
-Match the repo convention: extract pure logic and unit-test it (`buildCodeContext`, popup
-`computeAnchorPosition`, the `shouldHandleReviewKey` guard); implement the React glue (robot
-button, `AiChatPopup`, portal, motion, focus, `aiApi`) as thin components verified by the
-dashboard build (`npm --prefix dashboard run build`, i.e. `tsc --noEmit && vite build`) against
-the concrete UI contract embedded in the tasks below. There is NO React component-test infra
-(no jsdom/Testing Library) and this slice does NOT add one — the dashboard tests
-(`use-review-keys.test.ts`, `suggestion.test.ts`) test pure functions only; follow that.
+Extract the PID-file location and its write/remove into a small shared module
+`src/server-pids.ts` — the single source for `PID_DIR`, used by BOTH `server.ts` (the node
+process PID, one file per port) and the new llama-child PID file. The dir constant cannot live
+in `server.ts` because `server.ts` imports `./llama-runner.js` (line 11), so llama-runner
+importing from server.ts would be a cycle — the shared module is required, not merely tidy.
+Write the llama child PID **right after `spawn` returns** (not at health-ok) so a hard kill
+during the cold-start window is still cleaned up; remove it in both `RunningServer.stop()` and
+the child `exit` handler. All pid-file writes/removes are best-effort (swallow errors) so a
+filesystem failure can never throw into `ask`/spawn or wedge the ask-serialization mutex. The
+existing `pr-map-plugin/hooks/cleanup-server.sh` already globs `*.pid` and guards stale PIDs
+with `kill -0`, so it needs no change.
 
 ## Constraints
-- Do NOT add `@testing-library/react`, jsdom, or any component-test dependency. React
-  components are build-verified, not unit-tested; unit-test only the extracted pure functions.
-- Do NOT add the model dropdown (that is #60) — resolve a DEFAULT model via `GET /api/ai/models`
-  (prefer a model whose `name` contains "coder", else the first) and use it for `ask`.
-- Do NOT add the cold-start indicator or the styled amber/red error states (those are #61). The
-  MVP shows: idle → an instant user echo + a simple "Thinking…" indicator → the answer; a bare
-  failure may show a minimal inline "Request failed" line (no retry/copy affordances yet).
-- Do NOT change backend files (`src/**`) or the `/api/ai/*` contract. Frontend only under
-  `dashboard/src/**`.
-- At rest the diff must look BYTE-FOR-BYTE as today — the robot only appears on row hover / the
-  active-selection anchor row, exactly like the existing `+`.
-- Opening the popup must NOT open the inline comment editor (do not call `setTarget` on a cold
-  robot click; keep a separate lightweight anchor).
+- Do NOT modify `pr-map-plugin/hooks/cleanup-server.sh` — it already sweeps `$PID_DIR/*.pid` and
+  guards stale PIDs with `kill -0`, so `<port>-llama.pid` is handled for free.
+- Do NOT change the `/api/ai/*` contract, the `ask`/`shutdown` semantics, the spawn command, or
+  its flags (`llama-server -m <gguf> --port <port> --host 127.0.0.1 --no-webui`).
+- `server.ts` changes are LIMITED to sourcing `PID_DIR` and the two helpers from
+  `server-pids.ts` in place of its inline `mkdirSync`/`writeFileSync`/`rmSync`; behavior must be
+  byte-for-byte identical. Do NOT restructure `registerGracefulShutdown` or the startup flow.
+- pid-file writes and removes MUST be best-effort (wrapped in try/catch, errors swallowed) —
+  they must never throw into `ask`/spawn nor reject/hang the spawn Promise.
+- Write the llama pid file RIGHT AFTER `spawn` (covering cold start); do NOT defer it to the
+  health-ok branch.
+- Frontend is untouched (`dashboard/**`). No changes outside `src/server-pids.ts`,
+  `src/server.ts`, `src/llama-runner.ts`, and their test files.
 
 ## Patterns to follow
-- Pure-function unit tests: `dashboard/src/use-review-keys.test.ts`, `dashboard/src/suggestion.test.ts`.
-- Reuse `currentLineContents(lines, lineMeta, startLine, line)` from `dashboard/src/suggestion.ts`
-  for the selected-line text.
-- Client: mirror `dashboard/src/review-api.ts` (`asJson` + `fetch` wrappers) for `aiApi`.
-- zustand store: `dashboard/src/store.ts` (small `create<...>()` stores).
-- Keyboard hook + `isTypingTarget`: `dashboard/src/use-review-keys.ts`.
-- Diff gutter + selection (`target`, `beginDrag`, the `w-6` action cell, `renderRow`): `dashboard/src/diff-view.tsx`.
-- Existing palette: AI = purple (`ai-suggestion-badge.tsx`), selection = amber, comment `+` = blue-on-hover, surfaces = slate; dark-mode `dark:` variants throughout.
+- PID-file convention (dir, one file per port, mkdir-recursive + writeFileSync, rmSync force):
+  `src/server.ts` (`PID_DIR` at line 27; write at ~156-161; `rmSync` in `registerGracefulShutdown`
+  at ~120).
+- Dependency-injection seams with real defaults + fakes in tests: `src/llama-runner.ts`
+  (`LlamaSpawnerDeps` with injected `spawn`/`fetchFn`/`pickPort`) and its tests
+  `src/llama-runner.test.ts`.
+- Cleanup hook (read-only reference, do not edit): `pr-map-plugin/hooks/cleanup-server.sh`.
+- Result/error conventions: `src/result.ts`, `src/llm-provider.ts` (`LlmError` codes).
 
 ## Verification commands
 - Tests: `npm test`
@@ -46,48 +50,61 @@ the concrete UI contract embedded in the tasks below. There is NO React componen
 - Type check / build: `npm --prefix dashboard run build`
 
 ## Current state
-- `dashboard/src/diff-view.tsx`: `renderRow` builds each row; the `w-6` gutter cell holds the `+`
-  button (`onPointerDown={beginDrag}`) shown on hover. Selection state is `target: { startLine?;
-  line } | null`; `computeLineMeta(patch)` → `lineMeta`; `lines = patch.split('\n')`.
-- `dashboard/src/store.ts`: zustand `useSelection`, `usePanelTab`.
-- `dashboard/src/use-review-keys.ts`: `useReviewKeys({...})` adds a window `keydown` handler that
-  early-returns when `isTypingTarget(event.target)` (INPUT/TEXTAREA/SELECT); exports pure
-  `nextIndex`/`prevIndex`/`nextUnviewedIndex`.
-- `dashboard/src/review-api.ts`: `reviewApi` object of `fetch`-based methods via `asJson<T>`.
-- Backend (#55–#57): `GET /api/ai/models` → `{ models: {id,name,path}[] }`; `POST /api/ai/ask`
-  `{ model, messages }` → `{ reply }` (503 when llama.cpp missing).
-- `dashboard/src/index.css`: Tailwind v4 entry; no `--ease-out` token yet.
+- `src/llama-runner.ts`: `createLlamaSpawner(deps)` picks a free port, spawns
+  `llama-server ... --port <port> ...` (line 61 — `child.pid` is available immediately after),
+  polls `/health`, and on ready resolves `ok({ baseUrl, stop: () => child.kill() })`. A
+  `child.on('exit')` handler exists only for the early-exit-before-ready error case. `LocalChat`
+  swaps models via `current?.server.stop()` in `ensure()` and tears down via `shutdown()`
+  (`current?.server.stop(); current = null`). No PID file is written today. `ask` serializes
+  through a promise-chain mutex; a throw inside the spawn Promise executor rejects (caught by
+  `ask`'s try/catch), but a throw inside `pollHealth` would never resolve → mutex wedge.
+- `src/server.ts`: `const PID_DIR = join(tmpdir(), 'pr-map-server-pids')` (line 27); on startup
+  writes `join(PID_DIR, `${port}.pid`)` = `String(process.pid)` via `mkdirSync(PID_DIR, {
+  recursive: true })` + `writeFileSync(...)` in a non-fatal try/catch (~156-163);
+  `registerGracefulShutdown` removes it with `rmSync(pidFile, { force: true })` (~120). Imports
+  `existsSync, mkdirSync, rmSync, writeFileSync` from `node:fs` (line 4; `existsSync` is also
+  used at line 34), and `createLocalChat` from `./llama-runner.js` (line 11).
+- `pr-map-plugin/hooks/cleanup-server.sh`: SessionEnd hook; for each `$PID_DIR/*.pid` reads the
+  PID, `kill -0` guards it, `kill`s it, and `rm`s the file.
+- `src/llama-runner.test.ts`: spawner tests inject a fake `spawn` returning a child stub
+  (EventEmitter-like with `pid`, `kill`, `on`), plus fake `fetchFn`/`pickPort`, to drive the
+  ready/early-exit/timeout paths without a real binary.
 
 ## Desired end state
-- Hovering a commentable diff row shows the `+` AND a robot button in the gutter (purple on
-  hover), visually distinct; rest state unchanged. After a drag-select the robot stays visible on
-  the anchor row.
-- Clicking the robot opens a portaled, `position:fixed` `AiChatPopup` anchored to the row (below,
-  flipping above near the viewport bottom, clamped horizontally), scaling in ~170ms; it does not
-  open the comment editor.
-- The popup sends the selected code as context + the typed question to the default model and
-  renders the reply; follow-ups append (ephemeral). Enter sends; Shift+Enter newlines.
-- Escape, click-outside, or selecting a different line closes the popup and clears the
-  conversation; focus returns to the robot.
-- With the popup open, the global review shortcuts (`j/k/n/d/i/v/?`) do nothing.
-- `npm test`, `npm run lint`, `npm --prefix dashboard run build` all pass.
+- On a successful spawn, `<PID_DIR>/<port>-llama.pid` contains the llama-server child PID,
+  written immediately after `spawn` (before health polling completes).
+- That file is removed when the server is stopped (`RunningServer.stop()`, hence on model swap
+  and on `shutdown()`) AND when the child process emits `exit`.
+- After `kill -9` of the node process, the file remains; running `cleanup-server.sh` kills the
+  recorded llama PID (`kill -0`-guarded) and removes the file, so `pgrep llama-server` returns
+  nothing.
+- All pid-file write/remove failures are swallowed; `ask`/`shutdown`/spawn behavior and the
+  `/api/ai/*` contract are unchanged.
+- `PID_DIR` and the write/remove helpers have a single home in `src/server-pids.ts`, imported by
+  both `server.ts` and `llama-runner.ts`.
 
 ## Edge cases and risks
-- The diff scroll container is `overflow-auto` — the popup MUST be portaled to `document.body`
-  with `position:fixed`, or it gets clipped.
-- The virtualized diff (>~200 lines) unmounts the anchor row — capture the anchor rect at open
-  time; do not re-read it from a possibly-unmounted row.
-- Global shortcuts fire from non-input controls (the Send button) — the guard must suppress them
-  whenever the popup is open, not only when a text input is focused.
-- Two consecutive user turns are fine (the first user message carries the code context).
+- A throw inside the spawn Promise executor rejects the promise (caught by `ask`); a throw
+  inside `pollHealth` never resolves and wedges the mutex — so the pid write must be guarded and
+  sit right after `spawn`, outside any path that could leave the promise unresolved.
+- Writing only at health-ok would leave the cold-start seconds untracked — write right after
+  `spawn`.
+- `removePidFile` must be idempotent (`rmSync` with `force: true`), since it is called from both
+  `stop()` and the `exit` handler, and may run when no file was ever written (early spawn
+  failure) or when it was already removed.
+- The existing ready-path spawner tests reach the resolve branch; with the REAL default helpers
+  they would litter real pid files under `tmpdir()` — those tests must inject no-op
+  `writePid`/`removePid`.
+- Model swap / concurrent dashboards: one file per port; `ensure()`'s `stop()` removes the prior
+  port's file on swap.
+- Criterion "kill -9 node → `pgrep llama-server` empty" is a MANUAL/integration check (a human
+  starts the dashboard, does one `ask`, `kill -9`s node, runs the hook) — it is NOT automated
+  here; unit tests must not spawn real processes.
 
 ## Tasks
 
-- [x] Add the pure code-context builder. Create `dashboard/src/code-context.ts` exporting `buildCodeContext(lines: string[], lineMeta: DiffLineMeta[], target: { startLine?: number; line: number }, padding = 3): { code: string; label: string }`. Use `currentLineContents(lines, lineMeta, startLine, line)` (from `./suggestion`) to get the focus line text; also include up to `padding` context lines immediately before and after the focus range pulled from `lines`/`lineMeta` (by new-file line number), and MARK the focus line(s) so the model knows which lines the question is about (prefix focus lines with `> ` and context lines with `  `). `label` is a human string like `path` is unknown here so use the line range, e.g. `lines 40–48` or `line 42`. Export or import the `DiffLineMeta` type as needed (it is defined in `dashboard/src/diff-view.tsx`; if not exported, export it there and import it here — a type-only change). Write `dashboard/src/code-context.test.ts` following `dashboard/src/suggestion.test.ts`: given a small `patch`'s `lines`+`lineMeta` and a single-line `target`, assert the returned `code` marks the focus line with `> `, includes the surrounding context lines, and `label` reads `line N`; and for a range `target` assert `label` reads `lines A–B` and all focus lines are marked. Run `npm test`.
-- [x] Add the pure popup-position calculator. In a new `dashboard/src/popup-position.ts`, export `computeAnchorPosition(anchor: { top: number; bottom: number; left: number }, viewport: { width: number; height: number }, size: { width: number; height: number }, gap = 6): { top: number; left: number; origin: 'top left' | 'bottom left' }`. Default places the popup BELOW the anchor: `top = anchor.bottom + gap`, `left` clamped to `[8, viewport.width - size.width - 8]`, `origin: 'top left'`. If `anchor.bottom + gap + size.height > viewport.height - 8`, place ABOVE: `top = anchor.top - size.height - gap`, same clamped `left`, `origin: 'bottom left'`. Write `dashboard/src/popup-position.test.ts`: (a) with room below → top is `anchor.bottom+gap`, origin `top left`; (b) near the viewport bottom → flips above, origin `bottom left`; (c) an anchor near the right edge → `left` is clamped so `left + size.width <= viewport.width - 8`. Run `npm test`.
-- [x] Add the keyboard guard + AI-chat-open store. In `dashboard/src/use-review-keys.ts`, export a pure `shouldHandleReviewKey(target: EventTarget | null, isAiChatOpen: boolean): boolean` that returns `false` when `isAiChatOpen` is true OR `isTypingTarget(target)` is true, else `true`; refactor the window `keydown` handler to early-return unless `shouldHandleReviewKey(event.target, isAiChatOpen)` — take `isAiChatOpen` from a new dep on `ReviewKeysDeps` (default it to `false` for existing callers) OR read it from the store added next. In `dashboard/src/store.ts`, add `export const useAiChatOpen = create<{ open: boolean; setOpen: (open: boolean) => void }>((set) => ({ open: false, setOpen: (open) => set({ open }) }))`, and have `useReviewKeys` read `useAiChatOpen((s) => s.open)` to pass into the guard (so no caller change is required). Extend `dashboard/src/use-review-keys.test.ts` with a `describe('shouldHandleReviewKey')`: returns `false` when the popup is open (even for a non-input target like a `div`/`button`), `false` for an INPUT target, and `true` for a plain target when the popup is closed. Run `npm test`.
-- [x] Add the AI chat client and the popup component (build-verified UI — no component test; verify with `npm --prefix dashboard run build`). Create `dashboard/src/chat-api.ts` mirroring `dashboard/src/review-api.ts`: `export const aiApi = { listModels: () => fetch('/api/ai/models').then(asJson<{ models: { id: string; name: string; path: string }[] }>), ask: (body: { model: string; messages: { role: 'user' | 'assistant'; content: string }[] }) => fetch('/api/ai/ask', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) }).then(asJson<{ reply: string }>) }` (define a local `asJson` like review-api's). Create `dashboard/src/ask-popup.tsx` exporting `AiChatPopup(props: { anchorRect: { top: number; bottom: number; left: number }; scrollContainer: HTMLElement | null; contextCode: string; contextLabel: string; onClose: () => void })`: render via `createPortal(..., document.body)` with `position: fixed`, sized `w-[360px] max-h-[min(60vh,420px)]`, styled `rounded-md border border-slate-200 bg-white shadow-lg z-40 dark:border-slate-700 dark:bg-slate-900`, positioned with `computeAnchorPosition` (measure the popup via a ref/`useLayoutEffect`). SCROLL-FOLLOW (the container is `overflow-auto` and, when virtualized, the anchor row unmounts): capture the initial `anchorRect` and the container's `scrollTop` at open, and on `scrollContainer`'s `scroll` and window `resize`, recompute the base position from `computeAnchorPosition` using an anchor whose `top`/`bottom` are shifted by the scroll delta `-(scrollContainer.scrollTop - openScrollTop)`, then clamp to the viewport — the popup TRACKS the line and stays OPEN (never closes on scroll); if the anchor scrolls off, keep it pinned to the nearest clamped edge. Enter animation `opacity 0→1` + `scale(.96)→1` over 170ms with `transform-origin` from the position result, using `var(--ease-out)` (add `:root { --ease-out: cubic-bezier(0.23, 1, 0.32, 1); }` to `dashboard/src/index.css`); gate all motion behind `prefers-reduced-motion` (opacity only). Header: a `font-mono text-[11px] text-slate-500 dark:text-slate-400` context chip showing `contextLabel`, and a close `✕` (`text-slate-400 hover:text-slate-700 dark:hover:text-slate-200`). Conversation area (`flex-1 overflow-y-auto`): user turns `self-end rounded bg-slate-100 px-2 py-1 text-sm dark:bg-slate-800`, assistant turns `border-l-2 border-purple-300 bg-purple-50/50 px-2 py-1.5 text-sm dark:border-purple-700 dark:bg-purple-950/20`, auto-scroll to bottom. Composer: a growing `<textarea>` (Enter sends, Shift+Enter newlines, `onKeyDown` calls `event.stopPropagation()`), a send button (primary slate, `disabled` while awaiting). On first send resolve the default model with `aiApi.listModels()` (prefer a `name` containing "coder", else the first model's `id`); build `messages` as `[{ role:'user', content: `${contextCode}\n\nAnswer concisely.\nQuestion: ${question}` }, ...priorTurns]`, echo the user turn instantly, show a "Thinking…" indicator, call `aiApi.ask`, then append the assistant turn; on failure append a minimal `Request failed` line. Multi-turn follow-ups append to the same ephemeral `messages`. Escape (an `onKeyDown`/`keydown` listener that `stopPropagation`s and calls `onClose`) and a document `pointerdown` outside the portal node call `onClose`; move focus into the textarea on mount and return focus to the opener on unmount (accept an `onClose` that the caller uses to refocus the robot). Verify with `npm --prefix dashboard run build` (no unit test — no component-test infra).
-- [x] Wire the robot affordance into the diff and open the popup (build-verified UI — verify with `npm --prefix dashboard run build`). In `dashboard/src/diff-view.tsx`, inside the `w-6` gutter action cell of `renderRow`, add a small robot button next to the `+`: a 14px inline `<svg>` (simple robot/sparkle, `currentColor`), `className` giving `opacity-0 group-hover:opacity-100` plus visible when this row is the active anchor (`target?.line === newLine`), resting `text-slate-400` and `hover:text-purple-600 dark:hover:text-purple-400`, `title="Ask a local model about this line"`. On click: `event.stopPropagation()`, capture the row's `getBoundingClientRect()` (as `{ top, bottom, left }`) and build `{ code, label } = buildCodeContext(lines, lineMeta, target ?? { line: newLine })`, set local state `aiChat = { anchorRect, code, label }` WITHOUT calling `setTarget` (so the comment editor stays closed), and set the store `useAiChatOpen.setOpen(true)`. Render `{aiChat && <AiChatPopup anchorRect={aiChat.anchorRect} scrollContainer={<the diff's overflow-auto scroll container element>} contextCode={aiChat.code} contextLabel={aiChat.label} onClose={() => { setAiChat(null); useAiChatOpen.getState().setOpen(false); }} />}` once per `DiffView` (not per row) — pass the scroll container the diff already uses for the windowed/virtualized list (via its existing ref's `.current`; if there is no single ref, add one to that `overflow-auto` wrapper, or pass `null` and let the popup fall back to window scroll). Closing on a different-line robot click replaces `aiChat` (clears the prior conversation because the popup remounts — give `AiChatPopup` a `key` tied to the anchor). Verify with `npm --prefix dashboard run build` and confirm at rest the gutter is unchanged (robot hidden until hover/anchor).
-- [x] Run full verification and fix any failures: `npm test`, `npm run lint`, `npm --prefix dashboard run build`.
-- [x] Fix the rest-state regression in the diff gutter (build-verified UI — verify with `npm --prefix dashboard run build`; NO component test, do NOT add a component-test dependency). In `dashboard/src/diff-view.tsx` the gutter action `<span>` (around line 453) that holds the `+` and robot buttons was widened from `w-6` to `flex w-8 ... gap-0.5` to fit the robot beside the `+`; this reserves 32px instead of 24px and shifts EVERY diff row 8px right AT REST even though both buttons are `opacity-0` until hover, violating the issue's constraint that the idle diff look byte-for-byte as today. Fix: restore the cell to width `w-6` (24px) — that width is the only property that matters for the rest state, since the `+` is `opacity-0` at rest. Add `relative` to that `<span>` and render the robot `<button>` as an absolutely-positioned overlay that reserves NO flow width: add `absolute left-full top-1/2 -translate-y-1/2 z-10 ml-0.5` to the robot button so on hover/anchor it floats just to the RIGHT of the 24px gutter (over the left padding of the adjacent old-line-number `w-12` column) instead of widening the cell. Keep the `+` button exactly as before (normal flow, centered), and keep the robot's existing color/opacity/reveal classes (`text-slate-400 hover:text-purple-600 dark:hover:text-purple-400`, `opacity-0 group-hover:opacity-100`, and the `target?.line === newLine || aiChat?.anchorLine === newLine ? 'opacity-100' : ...` reveal) and its `onClick` unchanged. Do NOT "widen on hover" (that just moves the 8px jump to hover time). Verify: `npm --prefix dashboard run build` is clean AND that `<span>` no longer contains `w-8` (it is `w-6`). Exact robot placement is confirmed visually by a human at PR time.
-- [x] Fix the retry-after-failure wrong-question bug and cover it with a pure unit test. In `dashboard/src/ask-popup.tsx`, `sendMessage` caches the first user message in a write-once `contextMessageRef` (set around lines 166-171) and, when `conversationHistory.length === 0`, sends `contextMessageRef.current` (around lines 179-183). If the first send fails anywhere in the `try` (e.g. `resolveModel()`/`listModels()` throwing, or the local server erroring while cold), `conversationHistory` stays `[]`, so a later send with an EDITED question still transmits the frozen first question — the user's new question shows in `turns` but never reaches the model. Fix by extracting a PURE builder and deleting the ref. Create `dashboard/src/chat-messages.ts` exporting `buildOutgoingMessages(conversationHistory: ChatMessage[], contextCode: string, question: string): ChatMessage[]` (import `ChatMessage` from `./chat-api`) that returns, when `conversationHistory.length === 0`, `[{ role: 'user', content: `${contextCode}\n\nAnswer concisely.\nQuestion: ${question}` }]`, else `[...conversationHistory, { role: 'user', content: question }]`. In `ask-popup.tsx`: remove the `contextMessageRef` declaration (around line 49) and its init block (around lines 166-171), and replace the `isFirstMessage`/`newUserMessage`/`messages` construction (around lines 179-183) with `const messages = buildOutgoingMessages(conversationHistory, contextCode, question);` — built from the CURRENT `question` each send. Keep the first-message content format BYTE-IDENTICAL (`${contextCode}\n\nAnswer concisely.\nQuestion: ${question}`) so the multi-turn code-context fix (finding #1) stays intact; leave the rest of `sendMessage` (turn echo, `setConversationHistory([...messages, { role: 'assistant', content: reply }])`, error handling) unchanged. RED first: write `dashboard/src/chat-messages.test.ts` (follow `dashboard/src/code-context.test.ts`) asserting (a) empty history → one message whose content contains BOTH `contextCode` and the `question`; (b) SAME empty history but a DIFFERENT `question` (the retry case) → content uses the NEW question and still contains `contextCode`; (c) non-empty history → `[...history, { role:'user', content: question }]` with NO `contextCode` re-added. Confirm the test fails before the change and passes after. Run `npm test`, `npm run lint`, `npm --prefix dashboard run build`.
+- [ ] Create `src/server-pids.ts` and refactor `src/server.ts` to use it (behavior-preserving). New file `src/server-pids.ts` exports: `export const PID_DIR = join(tmpdir(), 'pr-map-server-pids');` (import `tmpdir` from `node:os`, `join`/`dirname` from `node:path`); `export function writePidFile(pidFilePath: string, pid: number): void` that, wrapped in a `try/catch` that swallows errors, does `mkdirSync(dirname(pidFilePath), { recursive: true })` then `writeFileSync(pidFilePath, String(pid))` (import `mkdirSync`/`writeFileSync`/`rmSync` from `node:fs`); and `export function removePidFile(pidFilePath: string): void` that, in a `try/catch` swallowing errors, does `rmSync(pidFilePath, { force: true })`. Then edit `src/server.ts`: delete the local `const PID_DIR = ...` (line 27) and import `{ PID_DIR, writePidFile, removePidFile }` from `./server-pids.js`; replace the inline `mkdirSync(PID_DIR, { recursive: true })` + `writeFileSync(pidFile, String(process.pid))` block with a single `writePidFile(pidFile, process.pid)` (the helper is already best-effort — you may drop the now-redundant surrounding try/catch, keeping the same non-fatal behavior); replace the `rmSync(pidFile, { force: true })` in `registerGracefulShutdown` with `removePidFile(pidFile)`; remove `mkdirSync, rmSync, writeFileSync` from the `node:fs` import on line 4 (KEEP `existsSync`, still used at line 34); and remove `tmpdir` from the `node:os` import on line 5 (KEEP `homedir`, still used at line 143) since deleting `PID_DIR` removes its only use — `@typescript-eslint/no-unused-vars` is an error, so leaving it would fail the lint gate. Do NOT change `registerGracefulShutdown`'s signature or the startup order. Write `src/server-pids.test.ts` (Vitest, following the style of `src/llama-runner.test.ts`): create a unique temp dir with `mkdtempSync(join(tmpdir(), 'pr-map-pids-'))`; assert (a) `writePidFile(join(dir, 'sub', '123.pid'), 123)` creates the missing parent dir and the file contains `'123'`; (b) `removePidFile` deletes an existing file; (c) `removePidFile` on a non-existent path does NOT throw; (d) `writePidFile` to an un-writable path (e.g. a path whose parent is an existing regular file) does NOT throw (best-effort). Run `npm test`.
+
+- [ ] Now that `src/server-pids.ts` exists, track the llama-server child PID in the spawner. In `src/llama-runner.ts`: import `{ PID_DIR, writePidFile, removePidFile }` from `./server-pids.js` (`join` is already imported from `node:path`). Extend `LlamaSpawnerDeps` with two optional seams: `writePid?: (pidFilePath: string, pid: number) => void;` and `removePid?: (pidFilePath: string) => void;`, and in `createLlamaSpawner` default them to `deps.writePid ?? writePidFile` and `deps.removePid ?? removePidFile`. In the returned spawner, immediately AFTER the spawn `try/catch` block (after line 64, in the outer function scope — NOT inside the `try` — so it is visible to the Promise executor below), and before the `return new Promise(...)`, compute `const pidFilePath = join(PID_DIR, `${port}-llama.pid`);` and, guarded by `if (child.pid !== undefined)`, call `writePid(pidFilePath, child.pid)`. Add a `child.on('exit', () => removePid(pidFilePath));` listener (in ADDITION to the existing early-exit error handler — do not remove or alter that one). Change the ready-path resolve from `stop: () => child.kill()` to `stop: () => { child.kill(); removePid(pidFilePath); }`. Do NOT write the pid file in the health-ok branch, and do NOT change the spawn flags, health polling, timeout, or error resolution. Extend `src/llama-runner.test.ts`: add tests that inject fake `writePid`/`removePid` spies (arrays recording their args) alongside the existing fake `spawn`/`fetchFn`/`pickPort` that drive a spawn to READY, and assert: (a) `writePid` was called once with a `pidFilePath` ending in `${port}-llama.pid` and the fake child's `pid`; (b) calling the resolved `RunningServer.stop()` calls `removePid` with that same path; (c) emitting the fake child's `exit` event calls `removePid` with that path. ALSO update any EXISTING spawner test that reaches the ready path to pass no-op `writePid: () => {}` / `removePid: () => {}` in its deps so it does not write real pid files under `tmpdir()`. Run `npm test`.
+
+- [ ] Run full verification and fix any failures: `npm test`, `npm run lint`, `npm run typecheck`. Note that the acceptance criterion "start the dashboard, trigger one `ask`, `kill -9` the node server, run the SessionEnd hook → `pgrep llama-server` returns nothing" is a MANUAL integration check performed by a human — do NOT attempt to automate it by spawning real processes.
