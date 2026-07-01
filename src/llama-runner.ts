@@ -185,6 +185,7 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
             const reply = await providerFor(current!.server.baseUrl).chat(request.messages);
             resolve(reply);
           } catch (e) {
+            current = null;
             resolve(err({ code: 'request_failed', message: `ask failed: ${(e as Error).message}` }));
           }
         });
@@ -192,17 +193,8 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
     },
 
     async shutdown() {
-      return new Promise((resolve) => {
-        mutex = mutex.then(() => {
-          try {
-            current?.server.stop();
-            current = null;
-          } catch {
-            current = null;
-          }
-          resolve();
-        });
-      });
+      current?.server.stop();
+      current = null;
     },
   };
 }

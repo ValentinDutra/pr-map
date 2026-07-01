@@ -430,4 +430,81 @@ describe('ask/shutdown', () => {
       expect(r2.value).toBe('reply');
     }
   });
+
+  it('shutdown does not block behind an in-flight chat', async () => {
+    const stopSpy = vi.fn();
+    const spawnServer = vi.fn(
+      async (): Promise<Result<RunningServer, LlmError>> =>
+        ok({ baseUrl: 'http://127.0.0.1:9999', stop: stopSpy }),
+    );
+    const providerFor = () => ({
+      chat: async () => new Promise<never>(() => {}), // Never resolves
+      complete: async () => ok(''),
+    });
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor,
+    });
+
+    // Start an ask but don't await it - it will hang on chat()
+    const askPromise = localChat.ask({
+      model: 'm1.gguf',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    // Let ensure/spawn settle
+    await new Promise((r) => setImmediate(r));
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+
+    // shutdown() should resolve promptly, not wait behind the hung chat
+    const startTime = Date.now();
+    await localChat.shutdown();
+    const elapsed = Date.now() - startTime;
+
+    expect(elapsed).toBeLessThan(100);
+    expect(stopSpy).toHaveBeenCalledTimes(1);
+
+    // Clean up - the askPromise will never resolve, but that's fine for the test
+    void askPromise;
+  });
+
+  it('resets current when spawnServer throws during swap so same-model ask respawns', async () => {
+    const stop1 = vi.fn();
+    let callCount = 0;
+    const spawnServer = vi.fn(async (): Promise<Result<RunningServer, LlmError>> => {
+      callCount++;
+      if (callCount === 1) {
+        return ok({ baseUrl: 'http://127.0.0.1:9999', stop: stop1 });
+      }
+      if (callCount === 2) {
+        // Second call (swap to m2) throws
+        throw new Error('spawn failed during swap');
+      }
+      // Third call succeeds
+      return ok({ baseUrl: 'http://127.0.0.1:8888', stop: vi.fn() });
+    });
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    // First ask for m1 succeeds
+    const r1 = await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'a' }] });
+    expect(isOk(r1)).toBe(true);
+
+    // Second ask for m2 (swap) fails - spawnServer throws after stop1 was called
+    const r2 = await localChat.ask({ model: 'm2.gguf', messages: [{ role: 'user', content: 'b' }] });
+    expect(isOk(r2)).toBe(false);
+    expect(stop1).toHaveBeenCalledTimes(1);
+
+    // Third ask for m1 again - if current wasn't reset, this would reuse the dead m1 server
+    // Instead it should spawn a new server (callCount 3)
+    const r3 = await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'c' }] });
+    expect(spawnServer).toHaveBeenCalledTimes(3);
+    expect(isOk(r3)).toBe(true);
+  });
 });
