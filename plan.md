@@ -1,88 +1,85 @@
-# #55 — Deepen llm-provider to a `chat()` primitive + shared chat vocabulary
+# #56 — GET /api/ai/models lists on-disk GGUFs (mmproj filtered)
 
 ## Goal
-Make a multi-turn conversation the primitive of the LLM provider abstraction, without changing
-any existing behavior. Today `LlmProvider` only exposes `complete(prompt: string)`. We add
-`chat(messages: ChatMessage[])` as the real primitive and make `complete` a thin delegate, so the
-upcoming local-model chat feature (#57 `POST /api/ai/ask`) can hold a conversation while
-enrichment keeps calling `complete` byte-for-byte identically. We also add the shared vocabulary
-(`ChatMessage`, `ModelInfo`) and a discriminating `code` on `LlmError` that later slices (the
-popup's "install llama.cpp" vs "request failed" states) depend on. This is the enabling
-groundwork slice for #56/#57/#59/#60/#61/#62.
+Expose the local models a reviewer can ask about. Add a `LocalChat` module that discovers the
+`.gguf` files under a models directory and a `GET /api/ai/models` endpoint that returns them, so
+the upcoming popup's model dropdown (#60) has something to list and the whole feature has its
+first curl-able, user-observable slice. Depends on #55's `ModelInfo` type and `LlmError`.
 
 ## Approach
-A **deepening, not a widening**: both existing adapters already POST a `messages` array
-internally, so `chat(messages)` is a trivial extraction and `complete(prompt)` shrinks to
-`chat([{ role: 'user', content: prompt }])`. The single-message request body stays identical to
-today's, guaranteeing enrichment output is unchanged. Grounded in the existing code in
-`src/llm-provider.ts` (`createOllamaProvider`, `createOpenAiCompatibleProvider`) and the
-Result/Retry helpers in `src/result.ts` / `src/retry.ts`.
+A deep `LocalChat` module hides model discovery behind a small interface. Its discovery core is a
+pure function (`discoverModels`) testable with no disk; `listModels` does the real filesystem
+walk. The endpoint is thin wiring over `listModels`, mirroring the existing thin routers
+(`createChecksRouter`). `LocalChat` starts with only `listModels`; #57 widens it with `ask`/
+`shutdown`. Grounded in `src/review-endpoints.ts` (router + `wrap` pattern), `src/server.ts`
+(deps + mounting), `src/result.ts`, and #55's `src/types.ts` `ModelInfo`.
 
 ## Constraints
-- Do NOT implement the `LocalChat` runner, any `/api/ai/*` endpoint, or `llama-server` process
-  spawning — those are issues #56 and #57.
-- Do NOT change the observable behavior of `complete()`: the single-message request body and the
-  returned text must stay byte-identical (the existing `enrich`/provider tests must still pass).
-- Do NOT add any code that *produces* `'llama_not_found'` or `'model_load_failed'` yet — this
-  issue only introduces the `code` type union and uses `'request_failed'` at existing error
-  sites. The other two codes arrive with the runner in #57.
-- Do NOT cross the src↔dashboard package boundary: `dashboard/src/types.ts` is a hand-maintained
-  mirror (see its header comment) — duplicate the type declarations, do not import across.
-- Stay in the Result world: no throwing; errors are `err(...)` values.
+- Do NOT implement `ask`, model spawning, `llama-server`, or the swap/serialization logic — those
+  are #57. `LocalChat` exposes ONLY `listModels` in this slice; no stub methods for future work.
+- Do NOT add any dashboard/frontend code — this slice is backend only.
+- A missing or unreadable models directory must return an EMPTY list, never a 500 or a throw
+  (stay in the Result world; fail soft).
+- Filter out `mmproj-*` files (vision projectors, e.g. `mmproj-model-f16.gguf`) — they are not
+  chat models.
+- Follow NodeNext `.js` import extensions and the Result pattern; no new runtime dependencies.
 
 ## Patterns to follow
-- Provider structure, Result/Retry usage, `postJson` timeout handling: follow the existing
-  `createOllamaProvider` and `createOpenAiCompatibleProvider` in `src/llm-provider.ts`.
-- Result helpers (`ok`, `err`, `isOk`): `src/result.ts`.
-- Tests: follow the `describe('selectProvider', ...)` structure in `src/llm-provider.test.ts`.
-  For HTTP mocking, use vitest's `vi.stubGlobal('fetch', vi.fn(...))` with
-  `afterEach(() => vi.unstubAllGlobals())`.
-- Type-mirror convention: `dashboard/src/types.ts` header comment ("Mirrors the PrGraph contract
-  from ../../src/types.ts. Kept as a separate copy ...").
+- Thin router + `wrap` async handler + Result-to-HTTP mapping: follow `createChecksRouter` in
+  `src/review-endpoints.ts` (copy the ~5-line local `wrap` helper into the new module — keep the
+  module self-contained rather than exporting `wrap`).
+- Router deps + mounting: follow how `src/server.ts` builds `ServerDeps` in `startServer` and
+  mounts routers with `app.use('/api/<name>', createXRouter(deps))` in `createApp` (mount the new
+  one BEFORE the `/api` catch-all 404).
+- Operation-style tests with real/injected dependencies (no supertest): follow
+  `src/review-endpoints.test.ts` (it tests operations directly). Pure-function tests: follow
+  `src/import-rules.test.ts` / `src/changed-symbols.test.ts`.
+- Result helpers (`ok`, `err`, `isOk`): `src/result.ts`. `ModelInfo`: `src/types.ts`. `LlmError`:
+  `src/llm-provider.ts`.
 
 ## Verification commands
 - Tests: `npm test`
 - Lint: `npm run lint`
-- Type check: `npm run typecheck && npm --prefix dashboard run build`
+- Type check: `npm run typecheck`
 
 ## Current state
-- `src/llm-provider.ts` defines `interface LlmError { message: string }`, `interface LlmProvider
-  { complete(prompt): Promise<Result<string, LlmError>> }`, and two factories
-  (`createOllamaProvider` → POST `/api/chat` `{ model, stream:false, messages:[{role:'user',
-  content:prompt}] }`; `createOpenAiCompatibleProvider` → POST `/chat/completions` `{ model,
-  messages:[{role:'user',content:prompt}] }` with a Bearer header). Both extract text and wrap in
-  `retry(...)`. There are **8** `err({ message })` sites (lines ~40, 48, 78, 114, 154, 160, 163,
-  177). `selectProvider(env)` builds a provider from env.
-- `src/llm-provider.test.ts` only tests `selectProvider` (no fetch mocking yet).
-- `src/enrich.test.ts` imports `LlmError` and builds error Results via a `fixedProvider` helper.
-- `src/types.ts` and `dashboard/src/types.ts` hold the graph contract; neither has any LLM/chat
-  types yet.
+- `src/server.ts`: `createApp(deps: ServerDeps)` where `ServerDeps = { dataDir, ghClient, store }`;
+  routers mounted with `app.use('/api/review', createReviewRouter({...}))` etc., then a
+  `app.use('/api', ...)` JSON-404 catch-all. `startServer` builds the real `ghClient`/`store` and
+  calls `createApp`.
+- `src/review-endpoints.ts`: `createChecksRouter(deps): Router` = `Router()` + one
+  `router.get('/', wrap(async (_req, res) => { const r = await getChecks(...); isOk(r) ? res.json(r.value) : res.status(502).json({ error: r.error.message }) }))`. `wrap` is a small local
+  helper (not exported).
+- `src/types.ts` (from #55): `ModelInfo = { id: string; name: string; path: string }`.
+- `src/llm-provider.ts` (from #55): `LlmError = { code: LlmErrorCode; message: string }`.
+- The user's models live as `~/models/<model-folder>/<file>.gguf` (e.g.
+  `~/models/qwen2.5-coder-1.5b/qwen2.5-coder-1.5b-instruct-q4_k_m.gguf`), plus a
+  `mmproj-model-f16.gguf` alongside gemma. Node is v25 (supports `readdir(dir, { recursive: true,
+  withFileTypes: true })`).
 
 ## Desired end state
-- `LlmProvider` exposes both `chat(messages: ChatMessage[]): Promise<Result<string, LlmError>>`
-  (primitive) and `complete(prompt: string): Promise<Result<string, LlmError>>` (delegates to
-  `chat([{ role:'user', content: prompt }])`). Both adapters implement `chat` by POSTing the full
-  `messages` array.
-- `LlmError` is `{ code: LlmErrorCode; message: string }` with
-  `type LlmErrorCode = 'llama_not_found' | 'model_load_failed' | 'request_failed'`; every existing
-  error site sets `code: 'request_failed'`.
-- `ChatMessage` and `ModelInfo` exist, identical, in both `src/types.ts` and
-  `dashboard/src/types.ts`.
-- All three verification commands pass; existing enrichment behavior is unchanged.
+- `src/llama-runner.ts` exports `interface LocalChat { listModels(): Promise<Result<ModelInfo[],
+  LlmError>> }` and `createLocalChat({ modelsDir }): LocalChat`.
+- `listModels()` recursively finds `*.gguf` under `modelsDir`, drops `mmproj-*`, returns
+  `ok(ModelInfo[])`; a missing/unreadable dir returns `ok([])`.
+- `GET /api/ai/models` returns `200 { models: ModelInfo[] }`; against a dir with one real `.gguf`
+  and one `mmproj-*.gguf` it returns only the real model.
+- `startServer` builds `LocalChat` from `PRMAP_MODELS_DIR` (default `~/models`) and the router is
+  mounted at `/api/ai`.
+- `npm test`, `npm run lint`, `npm run typecheck` all pass.
 
 ## Edge cases and risks
-- Making `code` required on `LlmError` is a breaking type change — every construction site must
-  set it. `tsc` catches misses; watch `src/enrich.test.ts` for inline `err({ message })` that now
-  needs a `code`.
-- `complete` delegation must preserve the exact single-message request body so enrichment output
-  is byte-identical — the delegate produces `messages:[{role:'user',content:prompt}]`, matching
-  today.
-- Fetch mocking must not leak between tests — always `vi.unstubAllGlobals()` in `afterEach`.
-- Keep the openai-compatible `Authorization: Bearer` header inside the new `chat` path.
+- Models are in SUBDIRECTORIES of the models dir, so discovery must recurse (not just read the top
+  level). Use `readdir(..., { recursive: true, withFileTypes: true })` and join `dirent.parentPath`
+  + `dirent.name`.
+- `mmproj-*` filtering is by basename; match case-insensitively and only real `.gguf` files.
+- A non-existent `modelsDir` (user has no `~/models`) is normal, not an error → `ok([])`.
+- `id` must be stable and unique per model (use the path relative to `modelsDir`); `name` should be
+  human-friendly (the parent folder name when nested, else the filename without `.gguf`).
 
 ## Tasks
 
-- [x] Add the shared chat vocabulary types. In `src/types.ts`, append two exported interfaces (near the other exported interfaces): `export interface ChatMessage { role: 'user' | 'assistant'; content: string }` and `export interface ModelInfo { id: string; name: string; path: string }`. Then add the IDENTICAL two interfaces to `dashboard/src/types.ts` (the hand-maintained mirror described in its header comment) — same names, fields, and order; duplicate the declarations, do not import across the package boundary. Pure type declarations need no unit test; verify they compile with `npm run typecheck && npm --prefix dashboard run build`.
-- [x] Add a discriminating `code` to `LlmError`. In `src/llm-provider.ts`, add `export type LlmErrorCode = 'llama_not_found' | 'model_load_failed' | 'request_failed'` and change `interface LlmError` to `{ code: LlmErrorCode; message: string }`. Update all 8 existing `err({ ... })` sites in this file (the two in `postJson`, the ollama `message.content` guard, the openai `choices[0].message.content` guard, and the four in `selectProvider`) to include `code: 'request_failed'` (the other two codes are not produced until #57). If `src/enrich.test.ts` builds any inline `err({ message })` of type `LlmError`, add `code: 'request_failed'` there too so it type-checks. Add a test in `src/llm-provider.test.ts` (extend the existing `selectProvider` describe or add a sibling): assert `selectProvider({ PRMAP_LLM_PROVIDER: 'banana' })` returns an error whose `.error.code === 'request_failed'` (alongside the existing message assertion). Run `npm test`.
-- [x] Now that `ChatMessage` (task 1) and `LlmError.code` (task 2) exist, deepen the provider to a `chat()` primitive. In `src/llm-provider.ts`, import `ChatMessage` from `./types.js`; add `chat(messages: ChatMessage[]): Promise<Result<string, LlmError>>` to the `LlmProvider` interface (keep `complete`). Refactor `createOllamaProvider` so `chat(messages)` POSTs `{ model, stream: false, messages }` (forward the array as-is) reusing the same `retry`/`postJson`/timeout and `message.content` extraction, and implement `complete(prompt)` as `chat([{ role: 'user', content: prompt }])`. Do the same for `createOpenAiCompatibleProvider`: `chat(messages)` POSTs `{ model, messages }` keeping the `Authorization: Bearer` header and the `choices[0].message.content` extraction; `complete(prompt)` delegates identically. Add tests in `src/llm-provider.test.ts` using `vi.stubGlobal('fetch', vi.fn(...))` (with `afterEach(() => vi.unstubAllGlobals())`): (a) `createOllamaProvider(...).chat([{role:'user',content:'a'},{role:'assistant',content:'b'},{role:'user',content:'c'}])` posts a body whose `messages` equals those three verbatim and returns the mocked `message.content`; (b) `createOpenAiCompatibleProvider(...).chat([...])` forwards `messages` verbatim in the posted body and returns `choices[0].message.content`; (c) `complete('hi')` on the ollama provider posts exactly one message `{role:'user',content:'hi'}` (proves delegation). Run `npm test`.
-- [x] Run full verification and fix any failures: `npm test`, `npm run lint`, `npm run typecheck && npm --prefix dashboard run build`.
+- [ ] Add the pure model-discovery function. In a new `src/llama-runner.ts`, export `discoverModels(ggufPaths: string[], modelsDir: string): ModelInfo[]` — import `ModelInfo` from `./types.js`. For each path: keep only those ending in `.gguf` (case-insensitive) whose basename does NOT start with `mmproj` (case-insensitive); build `{ path, id, name }` where `path` is the given path, `id` is the path relative to `modelsDir` (use `node:path` `relative`), and `name` is the parent directory's basename when the file is nested under `modelsDir`, otherwise the filename without its `.gguf` extension. Pure — no filesystem access. Write `src/llama-runner.test.ts` following `src/changed-symbols.test.ts`: a `describe('discoverModels')` given a fixed list `[<modelsDir>/qwen3-4b/Qwen3-4B-Q4_K_M.gguf, <modelsDir>/gemma-3-4b/gemma-3-4b-it-Q4_K_M.gguf, <modelsDir>/gemma-3-4b/mmproj-model-f16.gguf, <modelsDir>/notes.txt]` returns exactly the two real models (mmproj and non-gguf dropped) with `name` = `qwen3-4b` / `gemma-3-4b` and the expected relative `id`s. Run `npm test`.
+- [ ] Now that `discoverModels` exists, add the `LocalChat` module. In `src/llama-runner.ts`, export `interface LocalChat { listModels(): Promise<Result<ModelInfo[], LlmError>> }` (import `Result` from `./result.js`, `LlmError` from `./llm-provider.js`, `ModelInfo` from `./types.js`) and `createLocalChat(options: { modelsDir: string }): LocalChat`. Implement `listModels()`: `await readdir(options.modelsDir, { recursive: true, withFileTypes: true })` (from `node:fs/promises`), keep file dirents, build absolute paths by joining `dirent.parentPath` + `dirent.name`, pass them and `modelsDir` to `discoverModels`, and return `ok(models)`. Wrap the whole thing in try/catch — any error (including a non-existent dir, `ENOENT`) returns `ok([])`, never a throw or an `err`. Extend `src/llama-runner.test.ts` with a `describe('listModels')` that uses a real temp dir (`mkdtemp` from `node:fs/promises` in `os.tmpdir()`): create `<tmp>/m1/model-a-q4.gguf`, `<tmp>/m1/mmproj-model-f16.gguf`, and `<tmp>/empty-sub/` (no gguf); assert `createLocalChat({ modelsDir: tmp }).listModels()` resolves to `ok` containing exactly one model (`model-a-q4`'s folder → name `m1`), and that `createLocalChat({ modelsDir: join(tmp, 'does-not-exist') }).listModels()` resolves to `ok([])`. Clean up the temp dir in the test. Run `npm test` and `npm run typecheck`.
+- [ ] Now that `createLocalChat`/`listModels` exists, expose it over HTTP and wire it in. Create `src/ai-endpoints.ts` exporting `interface AiRouterDeps { localChat: LocalChat }` (import `LocalChat` from `./llama-runner.js`) and `createAiRouter(deps: AiRouterDeps): Router` — copy the small local `wrap` async-handler helper from `src/review-endpoints.ts`, and add `router.get('/', wrap(async (_request, response) => { const result = await deps.localChat.listModels(); if (isOk(result)) { response.json({ models: result.value }); } else { response.status(500).json({ error: result.error.message }); } }))`. Then in `src/server.ts`: add `localChat: LocalChat` to `ServerDeps`; in `createApp`, mount `app.use('/api/ai', createAiRouter({ localChat: deps.localChat }))` BEFORE the `app.use('/api', ...)` 404 catch-all; in `startServer`, build `localChat: createLocalChat({ modelsDir: process.env.PRMAP_MODELS_DIR ?? join(homedir(), 'models') })` (import `homedir` from `node:os`, `createLocalChat` from `./llama-runner.js`, `createAiRouter` from `./ai-endpoints.js`) and pass it into the `createApp` deps. This is thin wiring mirroring `createChecksRouter`; the `listModels` behavior is already covered by task 2, so no new test is required — verify with `npm run typecheck`, `npm run lint`, and `npm test` (existing suite stays green).
+- [ ] Run full verification and fix any failures: `npm test`, `npm run lint`, `npm run typecheck`.
