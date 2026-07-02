@@ -102,3 +102,84 @@ body,
 .dark .token.builtin {
   color: #67e8f9;
 }
+
+/* Thinking indicator animations */
+@keyframes dot-bounce {
+  0%, 80%, 100% {
+    transform: translateY(0);
+    opacity: 0.6;
+  }
+  40% {
+    transform: translateY(-4px);
+    opacity: 1;
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+@keyframes slow-pulse {
+  0%, 100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+
+.thinking-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: currentColor;
+  animation: dot-bounce 1.4s infinite ease-in-out both;
+}
+
+.thinking-dot:nth-child(1) {
+  animation-delay: 0s;
+}
+
+.thinking-dot:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.thinking-dot:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+.thinking-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(148, 163, 184, 0.3) 0%,
+    rgba(148, 163, 184, 0.6) 50%,
+    rgba(148, 163, 184, 0.3) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+}
+
+.dark .thinking-shimmer {
+  background: linear-gradient(
+    90deg,
+    rgba(100, 116, 139, 0.3) 0%,
+    rgba(100, 116, 139, 0.6) 50%,
+    rgba(100, 116, 139, 0.3) 100%
+  );
+  background-size: 200% 100%;
+}
+
+.thinking-shimmer-reduced {
+  background-color: rgba(148, 163, 184, 0.4);
+  animation: slow-pulse 2s ease-in-out infinite;
+}
+
+.dark .thinking-shimmer-reduced {
+  background-color: rgba(100, 116, 139, 0.4);
+}

@@ -1,6 +1,20 @@
+export interface AskError extends Error {
+  code?: string;
+  status?: number;
+}
+
 async function asJson<T>(response: Response): Promise<T> {
   if (!response.ok) {
-    throw new Error((await response.text()) || `Request failed (${response.status})`);
+    let body: { error?: string; code?: string } = {};
+    try {
+      body = await response.json();
+    } catch {}
+    const err = new Error(
+      body.error || `Request failed (${response.status})`,
+    ) as AskError;
+    err.code = body.code;
+    err.status = response.status;
+    throw err;
   }
   return (await response.json()) as T;
 }
