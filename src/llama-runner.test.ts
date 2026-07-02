@@ -634,4 +634,50 @@ describe('ask/shutdown', () => {
     expect(spawnServer).toHaveBeenCalledTimes(3);
     expect(isOk(r3)).toBe(true);
   });
+
+  it('prewarm spawns the server once and leaves isReady true', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    expect(localChat.isReady()).toBe(false);
+
+    const result = await localChat.prewarm('m');
+
+    expect(isOk(result)).toBe(true);
+    expect(localChat.isReady()).toBe(true);
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+  });
+
+  it('prewarm twice for the same model spawns exactly once', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    await localChat.prewarm('m');
+    await localChat.prewarm('m');
+
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+  });
+
+  it('prewarm then ask for the same model spawns exactly once', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    await localChat.prewarm('m');
+    const result = await localChat.ask({ model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+
+    expect(isOk(result)).toBe(true);
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+  });
 });

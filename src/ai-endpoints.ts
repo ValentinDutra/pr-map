@@ -41,6 +41,19 @@ export function createAiRouter(deps: AiRouterDeps): Router {
   );
 
   router.post(
+    '/warm',
+    wrap(async (request, response) => {
+      const { model } = request.body as { model?: unknown };
+      if (typeof model !== 'string') {
+        response.status(400).json({ error: 'model (string) is required' });
+        return;
+      }
+      const result = await deps.localChat.prewarm(model);
+      response.json({ ready: isOk(result) });
+    }),
+  );
+
+  router.post(
     '/ask',
     wrap(async (request, response) => {
       const { model, messages } = request.body as { model?: unknown; messages?: unknown };
