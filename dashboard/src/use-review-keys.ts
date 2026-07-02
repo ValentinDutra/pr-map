@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import type { DetailTab } from './store';
+import { useAiChatOpen, type DetailTab } from './store';
 
 // Pure index math for file navigation, split out so it is unit-testable without the DOM.
 
@@ -41,13 +41,20 @@ export interface ReviewKeysDeps {
 
 // Keys typed into a form control are the user's text, never shortcuts.
 function isTypingTarget(target: EventTarget | null): boolean {
-  if (!(target instanceof HTMLElement)) return false;
+  const el = target as { tagName?: string; isContentEditable?: boolean } | null;
+  if (!el || !el.tagName) return false;
   return (
-    target.isContentEditable ||
-    target.tagName === 'INPUT' ||
-    target.tagName === 'TEXTAREA' ||
-    target.tagName === 'SELECT'
+    el.isContentEditable === true ||
+    el.tagName === 'INPUT' ||
+    el.tagName === 'TEXTAREA' ||
+    el.tagName === 'SELECT'
   );
+}
+
+export function shouldHandleReviewKey(target: EventTarget | null, isAiChatOpen: boolean): boolean {
+  if (isAiChatOpen) return false;
+  if (isTypingTarget(target)) return false;
+  return true;
 }
 
 // Window-level keyboard navigation for the review loop. Lives next to the graph because that is
@@ -61,10 +68,12 @@ export function useReviewKeys({
   onSetTab,
   onToggleHelp,
 }: ReviewKeysDeps): void {
+  const isAiChatOpen = useAiChatOpen((s) => s.open);
+
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (event.metaKey || event.ctrlKey || event.altKey) return;
-      if (isTypingTarget(event.target)) return;
+      if (!shouldHandleReviewKey(event.target, isAiChatOpen)) return;
 
       const currentIndex = selectedNodeId
         ? nodes.findIndex((node) => node.id === selectedNodeId)
@@ -109,5 +118,5 @@ export function useReviewKeys({
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [nodes, selectedNodeId, viewedPaths, onSelect, onToggleViewed, onSetTab, onToggleHelp]);
+  }, [nodes, selectedNodeId, viewedPaths, onSelect, onToggleViewed, onSetTab, onToggleHelp, isAiChatOpen]);
 }

@@ -3,6 +3,10 @@
 /* Class-based dark mode: `dark:` utilities apply under a `.dark` ancestor. */
 @custom-variant dark (&:where(.dark, .dark *));
 
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+}
+
 html,
 body,
 #root {
