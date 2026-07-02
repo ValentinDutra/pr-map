@@ -37,6 +37,13 @@ export const aiApi = {
   health: () =>
     fetch('/api/ai/health').then((response) => asJson<{ ready: boolean }>(response)),
 
+  warm: (body: { model: string }) =>
+    fetch('/api/ai/warm', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    }).then((response) => asJson<{ ready: boolean }>(response)),
+
   ask: (body: { model: string; messages: ChatMessage[] }) =>
     fetch('/api/ai/ask', {
       method: 'POST',

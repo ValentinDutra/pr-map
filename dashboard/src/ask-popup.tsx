@@ -271,8 +271,11 @@ export function AiChatPopup({
             <select
               value={modelId ?? ''}
               onChange={(e) => {
-                setModelId(e.target.value);
-                localStorage.setItem(MODEL_STORAGE_KEY, e.target.value);
+                const id = e.target.value;
+                setModelId(id);
+                localStorage.setItem(MODEL_STORAGE_KEY, id);
+                setWarming(true);
+                aiApi.warm({ model: id }).then(({ ready }) => setWarming(!ready)).catch(() => setWarming(false));
               }}
               className="max-w-[150px] truncate rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
             >
