@@ -1,96 +1,138 @@
-# #61 — Cold-start indicator + two distinct error states + reduced motion
+# #62 — Warm-overlap health ping + warming-up header chip
 
 ## Goal
-Make the first (cold) ask read as calm and deliberate rather than hung, and make failures tell the
-reviewer what to do: an amber "install llama.cpp" note for `llama_not_found`, a red "request
-failed" note with Retry for anything else. The warm ask keeps a fast indicator, visibly different
-from the cold state. All new motion has a reduced-motion fallback.
+Give the reviewer a subtle, non-blocking signal about whether the local model is already warm.
+When the ask popup opens against a cold (not-yet-spawned) server, a small "warming up" chip in the
+popup header tells them the first ask will be slower; when the server is already warm (from an ask
+earlier in the session), no chip shows. This is purely additive — asking behaves identically whether
+the chip is present or not.
 
 ## Approach
-Match the repo's #59/#60 convention: extract the real logic — classifying an ask failure and
-mapping elapsed wait-time to an indicator phase — into a pure, unit-tested
-`dashboard/src/ask-status.ts`, and implement the React glue (the timer, the indicators, the two
-error blocks, the copy/Retry buttons, the CSS keyframes) as build-verified edits to
-`dashboard/src/ask-popup.tsx` + `dashboard/src/index.css`, plus a small `dashboard/src/chat-api.ts`
-change so a failed `ask` surfaces the response `code`. Cold-vs-warm is decided by TIME (no backend
-health signal exists until #62): show the fast indicator immediately, escalate to the calm
-"warming" indicator only if the reply is slow.
+Extend the existing `LocalChat` deep module (`src/llama-runner.ts`) with one cheap, pure status
+method `isReady()` returning `current !== null`. That flag is an accurate "a warm server exists"
+signal: `current` is assigned only after a spawned server's health poll returns `status: ok`, and is
+reset to `null` on a failed swap and in `shutdown()`. Surface it through a thin `GET /api/ai/health`
+route (`src/ai-endpoints.ts`) returning `{ ready }`, mirroring the existing `/models` route. On the
+frontend add `aiApi.health()` to `dashboard/src/chat-api.ts` and a build-verified header chip in
+`dashboard/src/ask-popup.tsx` that fires `health()` once on mount and shows the chip only while cold,
+clearing it when an ask succeeds. This cold-vs-warm is a REAL backend signal (`isReady`), distinct
+from #61's time-based per-ask indicator: the chip is a persistent header hint about server warmth;
+#61's dots/shimmer is per-ask progress in the conversation area. They coexist without overlapping.
 
 ## Constraints
-- Do NOT add `@testing-library/react`, jsdom, or any component-test dependency. Unit-test only the
-  extracted pure functions; the popup/CSS edits are build-verified.
-- Do NOT change the popup's own enter/exit motion (owned by #59), the `/api/ai/*` contract, or any
-  backend file (`src/**`). Frontend only under `dashboard/src/**`.
-- Do NOT add a warm-overlap health ping / `GET /api/ai/health` (that is #62). Cold-vs-warm is
-  time-based only.
-- Cold-vs-warm is TIME-BASED escalation: warm = fast indicator shown immediately; if the reply has
-  not arrived after ~1.6s, switch to the calm cold indicator; after ~5s more, the "still warming"
-  copy. A warm (fast) reply must NEVER show the calm indicator.
-- Every new animated indicator MUST have a `prefers-reduced-motion` fallback (dots → the text
-  "Thinking…"; shimmer → static + a slow pulse).
-- Keep the existing default-model resolution, multi-turn history, portal/scroll-follow, and
-  keyboard guard unchanged — this slice only changes the pending indicator and the error rendering.
+- Do NOT actively spawn/prewarm a server from `health()` or on popup open / model-select. `health()`
+  is a pure read (`current !== null`). Auto-prewarming is an explicit out-of-scope follow-up.
+- Do NOT block or gate asking on health — the chip is informational and must never disable the
+  composer, delay a send, or surface an error.
+- Do NOT change the `/api/ai/ask` or `/api/ai/models` contracts, #61's cold-start indicator / two
+  error states, the model dropdown, portal/positioning/scroll-follow, or the keyboard guard.
+- Backend edits only in `src/llama-runner.ts` and `src/ai-endpoints.ts`; frontend edits only under
+  `dashboard/src/**`. Add NO new dependency (no jsdom / Testing Library / component-test infra).
+- The chip must coexist with #61's per-ask indicator without overlapping it — the chip lives in the
+  header row, the indicator stays in the conversation area.
 
 ## Patterns to follow
-- Pure-function unit tests: `dashboard/src/ask-status.test.ts` following `dashboard/src/model-select.test.ts`.
-- Existing motion token + gating: `dashboard/src/index.css` `--ease-out` (line 7); the popup's
-  `prefersReducedMotion` (via `window.matchMedia('(prefers-reduced-motion: reduce)')`) already used
-  for the enter animation in `ask-popup.tsx`.
-- Client fetch wrapper to extend: `asJson` in `dashboard/src/chat-api.ts` (lines 1-6).
-- Error/indicator render sites to replace: `ask-popup.tsx` `{pending && …Thinking…}` and
-  `{error && …}` (the conversation area, around lines 288-293).
+- `LocalChat` interface + impl: `src/llama-runner.ts` — the `LocalChat` interface (~line 131) and
+  `createLocalChat` (~line 143); `current` is the warm-server field (~line 154). `isReady()` is a
+  sibling of `listModels` / `ask` / `shutdown`.
+- `LocalChat` unit tests: `src/llama-runner.test.ts` `describe('ask/shutdown')` (~line 355) — uses
+  `createLocalChat` with a fake `spawnServer` (returns `ok({ baseUrl, stop })`) and a fake
+  `providerFor`; follow that setup to assert `isReady()` transitions.
+- Router route: the `GET '/models'` handler in `src/ai-endpoints.ts` (~lines 24-34) — follow its
+  `wrap(async ...)` shape for the new `GET '/health'`.
+- Client fetch method: `aiApi.listModels` in `dashboard/src/chat-api.ts` (~line 34) — add `health()`
+  the same way, reusing `asJson`.
+- Header render + mount fetch: `ask-popup.tsx` header row (~lines 251-281, the `contextLabel` + model
+  `<select>`) for chip placement; the existing mount effect that calls `aiApi.listModels()` (~lines
+  74-84, `.catch(() => {})` graceful degradation) for the `health()` fetch pattern.
 
 ## Verification commands
-- Tests: `npm test`
+- Type check: `npm run typecheck`
 - Lint: `npm run lint`
-- Type check / build: `npm --prefix dashboard run build`
+- Tests: `npm test`
+- Frontend build: `npm --prefix dashboard run build`
 
 ## Current state
-- `dashboard/src/ask-popup.tsx`: `error` state is `string | null` (line 52). `sendMessage`
-  (174-199) echoes the user turn, `setPending(true)`, `aiApi.ask(...)`, on success appends the
-  assistant turn + updates `conversationHistory`, on `catch` `setError('Request failed')`,
-  `finally` `setPending(false)`. Render (288-293): `{pending && <div …>Thinking...</div>}` and
-  `{error && <div className="text-red-600 …">{error}</div>}`. `resolveModel`/`modelId` fallback at
-  164-172/186. `prefersReducedMotion` is computed for the enter animation.
-- `dashboard/src/chat-api.ts`: `asJson` (1-6) throws `new Error(text || 'Request failed (status)')`
-  — it does NOT surface the `code`. `aiApi.ask` returns `{ reply }`.
-- Backend `POST /api/ai/ask` (src/ai-endpoints.ts): success `{ reply }`; `llama_not_found` → HTTP
-  503 `{ error, code: 'llama_not_found' }`; other errors → 502 `{ error, code }`; bad body → 400.
-- `dashboard/src/index.css`: 104 lines; `--ease-out` token at line 7; no `@keyframes` yet.
+- `src/llama-runner.ts`: `LocalChat = { listModels, ask, shutdown }`. `createLocalChat` holds
+  `let current: { model, server } | null = null`; `current` is set only after `spawnServer` resolves
+  `ok` (health-polled) and reset to `null` on a failed swap (~line 168) and in `shutdown()` (~line
+  209). No `isReady()` yet.
+- `src/ai-endpoints.ts`: `createAiRouter` exposes `GET /models` and `POST /ask` via a `wrap()` async
+  helper. No `/health` route.
+- `dashboard/src/chat-api.ts`: `aiApi = { listModels, ask }` using `asJson`; `AskError` surfaces
+  `code`/`status` (from #61). No `health()`.
+- `dashboard/src/ask-popup.tsx`: header row shows `contextLabel` + a model `<select>`; a mount effect
+  calls `aiApi.listModels()`. #61 added the per-ask indicator (dots/shimmer) in the conversation area
+  and the amber/red error states. No warming chip. `pending` / `error` / `elapsedMs` state exists.
+- `src/server.ts` wires `createAiRouter({ localChat })` at `/api/ai` (~line 63); `localChat` is a
+  long-lived singleton for the server process, so it stays warm across popup opens.
+- No `src/ai-endpoints.test.ts` exists — the `/models` and `/ask` routes are untested thin glue
+  (repo convention: the real logic lives in and is tested at the `LocalChat` level).
 
 ## Desired end state
-- While awaiting a reply: a warm 3-dot bounce indicator shows immediately; if the reply is slow
-  (~1.6s+) it becomes a calm shimmer indicator with copy "Starting local model…", escalating to
-  "Still warming up — the first run is slow." after ~5s more. A fast reply only ever shows the dots.
-- On `code:'llama_not_found'` (503): an amber setup note with a copyable `brew install llama.cpp`;
-  the composer stays usable.
-- On any other failure: a red note with a Retry button that re-sends the failed question; the
-  failed user turn stays visible; Retry does not echo a duplicate user turn.
-- With `prefers-reduced-motion: reduce`: the dots render as the static text "Thinking…" and the
-  shimmer renders static + a slow pulse.
-- `npm test`, `npm run lint`, `npm --prefix dashboard run build` all pass.
+- `LocalChat.isReady(): boolean` returns `true` iff a warm server is currently loaded
+  (`current !== null`): `false` before any ask, `true` after a successful ask, `false` again after
+  `shutdown()`.
+- `GET /api/ai/health` returns `{ ready: boolean }` from `localChat.isReady()`; `curl` shows
+  `ready:false` when cold and `ready:true` after an ask has warmed a model.
+- On popup mount the client calls `aiApi.health()`; if `ready` is `false`, a subtle "warming up" chip
+  renders in the popup header and never blocks input; the chip clears when an ask succeeds. If
+  `health()` reports `ready:true` or the fetch fails, no chip is shown.
+- The acceptance-criteria clause "the chip clears once a subsequent ask succeeds (or health reports
+  ready)" is satisfied by the mount check (a `ready:true` health response shows no chip) plus
+  clear-on-ask-success. Absent the out-of-scope prewarm, the server only becomes warm via an ask, so
+  there is no reachable state where a re-poll would clear an already-shown chip — no health polling
+  loop is added.
+- `npm run typecheck`, `npm run lint`, `npm test`, `npm --prefix dashboard run build` all pass.
 
 ## Edge cases and risks
-- The reply is synchronous (no streaming), so elapsed time is the ONLY cold/warm signal — the timer
-  must start when `pending` becomes true and stop when it clears; do not leak the interval (clear it
-  in the effect cleanup / when pending goes false).
-- A retry must rebuild messages from the UNCHANGED `conversationHistory` (a failed send never
-  updates it), exactly like the normal send — so `buildOutgoingMessages(conversationHistory,
-  contextCode, question)` is correct on retry too.
-- `navigator.clipboard` may be unavailable (non-secure context) — the copy button must not throw
-  (guard / swallow); copying is best-effort.
-- `classifyAskError` must treat an error with NO `code` (network failure, or a non-JSON body) as
-  `'failed'`, not `'unavailable'`.
-- Do not show BOTH an indicator and an error at once — clear `error` when a send/retry starts.
+- `isReady()` is a synchronous snapshot: during an in-flight cold ask (server still spawning)
+  `current` is still `null`, so it correctly returns `false` until the ask resolves `ok`. Do not try
+  to reflect "spawning" as ready.
+- `health()` must degrade gracefully (`.catch(() => {})`) — a failed health fetch simply shows no
+  chip; it must never surface an error or block asking.
+- The chip must not double-signal with #61's indicator: keep it in the header, and clear it on the
+  first successful ask (after which the server is warm).
+- No polling loop — a single mount `health()` call plus clear-on-ask-success is sufficient; re-polling
+  health on an interval is out of scope and would add a timer to leak.
+- Backend adds no npm dependency; the frontend chip is build-verified (no component test), consistent
+  with #59/#60/#61.
 
 ## Tasks
 
-- [x] Create the pure status module. New file `dashboard/src/ask-status.ts` exporting: `export const COLD_MS = 1600;` and `export const COLD_SLOW_MS = 6600;`; `export const COLD_COPY = 'Starting local model…';` and `export const COLD_SLOW_COPY = 'Still warming up — the first run is slow.';`; `export function classifyAskError(err: unknown): 'unavailable' | 'failed'` that returns `'unavailable'` when `err` is an object with a `code` property equal to `'llama_not_found'`, else `'failed'` (treat missing/`undefined` code, non-objects, and network errors as `'failed'`); and `export function thinkingPhase(elapsedMs: number): 'warm' | 'cold' | 'cold-slow'` returning `'warm'` when `elapsedMs < COLD_MS`, `'cold'` when `elapsedMs < COLD_SLOW_MS`, else `'cold-slow'`. Write `dashboard/src/ask-status.test.ts` following `dashboard/src/model-select.test.ts`: for `classifyAskError` assert `{ code: 'llama_not_found' }` → `'unavailable'`, `{ code: 'request_failed' }` → `'failed'`, `{ code: 'model_load_failed' }` → `'failed'`, `{}` → `'failed'`, and a plain `new Error('x')` → `'failed'`; for `thinkingPhase` assert `0` and `COLD_MS - 1` → `'warm'`, `COLD_MS` and `COLD_SLOW_MS - 1` → `'cold'`, `COLD_SLOW_MS` → `'cold-slow'`. Run `npm test`.
+- [x] Add the backend health capability: `LocalChat.isReady()` plus the `GET /api/ai/health` route.
+  In `src/llama-runner.ts`, add `isReady(): boolean` to the `LocalChat` interface (alongside
+  `listModels` / `ask` / `shutdown`) and implement it in `createLocalChat` as
+  `isReady() { return current !== null; }` (place it next to `shutdown` in the returned object); do NOT
+  change `ask` / `shutdown` / `ensure` logic. In `src/ai-endpoints.ts` add
+  `router.get('/health', wrap(async (_request, response) => { response.json({ ready: deps.localChat.isReady() }); }));`
+  following the existing `GET '/models'` handler shape (place it before the `POST '/ask'` route) — thin
+  glue matching the untested `/models` and `/ask` routes, so do NOT add an `ai-endpoints.test.ts` or
+  any route/component test framework; the real logic is unit-tested at the `LocalChat` level. Add that
+  unit test to `src/llama-runner.test.ts` following the `describe('ask/shutdown')` setup (create a
+  `createLocalChat` with a fake `spawnServer` that returns `ok({ baseUrl: 'http://127.0.0.1:1', stop:
+  () => {} })` and a fake `providerFor` returning `{ chat: async () => ok('hi'), complete: async () =>
+  ok('hi') }`): assert `isReady()` is `false` before any ask, `true` after one successful
+  `await localChat.ask({ model: 'm', messages: [{ role: 'user', content: 'x' }] })`, and `false` again
+  after `await localChat.shutdown()`. Run `npm test` and `npm run typecheck`.
 
-- [x] Surface the ask error `code` in the client. In `dashboard/src/chat-api.ts`, change `asJson` so that on `!response.ok` it reads the JSON error body and throws an `Error` carrying the `code`: define `export interface AskError extends Error { code?: string; status?: number }`; in `asJson`, on failure do `let body: { error?: string; code?: string } = {}; try { body = await response.json(); } catch {}` then `const err = new Error(body.error || \`Request failed (${response.status})\`) as AskError; err.code = body.code; err.status = response.status; throw err;`. This keeps the existing message behavior while adding `code`. Do NOT change `aiApi.listModels`/`aiApi.ask` signatures or the success path. There is no unit test for this thin fetch wrapper (repo convention — `chat-api.ts`/`review-api.ts` are untested glue); verify it compiles with `npm --prefix dashboard run build`.
+- [x] Now that `GET /api/ai/health` exists, wire the warming-up chip (build-verified UI — verify with
+  `npm --prefix dashboard run build` and `npm run typecheck`; NO component test). In
+  `dashboard/src/chat-api.ts` add `health: () => fetch('/api/ai/health').then((response) =>
+  asJson<{ ready: boolean }>(response))` to the `aiApi` object (reuse the existing `asJson`; do NOT
+  change `listModels` / `ask`). In `dashboard/src/ask-popup.tsx`: add a `const [warming, setWarming] =
+  useState(false);` state; add a mount `useEffect` (deps `[]`) that calls
+  `aiApi.health().then(({ ready }) => setWarming(!ready)).catch(() => {})` (follow the existing
+  `listModels` mount effect at ~lines 74-84); in the existing successful-ask path inside `runAsk`
+  (after the reply is appended) call `setWarming(false)` so a successful ask clears the chip; and
+  render a subtle chip in the header row (~lines 251-272, next to the `contextLabel` / model `<select>`
+  in the left `flex items-center gap-2` group) that shows only when `warming` is `true`, e.g.
+  `{warming && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700
+  dark:bg-amber-900/40 dark:text-amber-300">warming up</span>}`. The chip must NOT block input, must
+  NOT alter the composer, and must be independent of #61's `pending` indicator (do not gate it on
+  `pending`/`error`). Do NOT change the model dropdown, portal/positioning/scroll-follow, keyboard
+  guard, or #61's indicator/error blocks. Verify with `npm --prefix dashboard run build` and
+  `npm run typecheck`.
 
-- [x] Now that `thinkingPhase` exists, wire the cold-start / warm indicator into the popup (build-verified UI — verify with `npm --prefix dashboard run build`; NO component test, do NOT add a component-test dependency). In `dashboard/src/ask-popup.tsx`: import `{ thinkingPhase, COLD_COPY, COLD_SLOW_COPY }` from `./ask-status`. Add an elapsed-time driver: a `const [elapsedMs, setElapsedMs] = useState(0);` plus a `useEffect` that, WHEN `pending` is true, records a start time and starts a `setInterval` (~300ms) doing `setElapsedMs(Date.now() - start)`, and clears the interval + resets `elapsedMs` to 0 in the cleanup / when `pending` is false (effect deps `[pending]`). Replace the `{pending && <div …>Thinking...</div>}` block (~lines 288-289) with a `pending`-guarded indicator computed from `const phase = thinkingPhase(elapsedMs)`: `warm` → a 3-dot bounce (three `<span>`s animated via a new CSS keyframe, staggered ~700ms); `cold`/`cold-slow` → a calm shimmer bar (new CSS keyframe, ~1.6s) with the copy `COLD_COPY` (cold) or `COLD_SLOW_COPY` (cold-slow). Gate motion behind the existing `prefersReducedMotion`: when reduced, render the dots as the static text `Thinking…` and the shimmer as a static bar with a slow opacity pulse (still showing the staged copy). In `dashboard/src/index.css`, add the `@keyframes` for the dot bounce and the shimmer (and any small utility classes you reference), following the existing token style near line 7. Verify with `npm --prefix dashboard run build`; a warm/fast reply must only ever show the dots (never the shimmer). Human will visually confirm at PR time.
-
-- [x] Now that `classifyAskError` exists and `chat-api` surfaces `code`, wire the two error states + Retry (build-verified UI — verify with `npm --prefix dashboard run build`). In `dashboard/src/ask-popup.tsx`: change the `error` state type from `string | null` to `'unavailable' | 'failed' | null` (line 52) and add `const [lastQuestion, setLastQuestion] = useState('');`. Refactor `sendMessage` so the network attempt is reusable: extract `const runAsk = async (question: string) => { setError(null); setPending(true); try { const model = modelId || (await resolveModel()); const messages = buildOutgoingMessages(conversationHistory, contextCode, question); const { reply } = await aiApi.ask({ model, messages }); setConversationHistory([...messages, { role: 'assistant', content: reply }]); setTurns((prev) => [...prev, { role: 'assistant', content: reply }]); } catch (e) { setError(classifyAskError(e)); } finally { setPending(false); } };` (import `classifyAskError` from `./ask-status`). `sendMessage` becomes: guard on `!input.trim() || pending`, `const question = input.trim(); setInput(''); setTurns((prev) => [...prev, { role: 'user', content: question }]); setLastQuestion(question); void runAsk(question);` — i.e. it echoes the user turn once then delegates. Replace the `{error && <div className="text-red-600 …">{error}</div>}` block (~291-293) with: when `error === 'unavailable'`, an amber note (`border-l-2 border-amber-400 bg-amber-50 px-2 py-1.5 text-sm dark:bg-amber-950/30`, matching the review palette) reading that llama.cpp isn't installed, containing a `<code>brew install llama.cpp</code>` and a small Copy button whose `onClick` does `navigator.clipboard?.writeText('brew install llama.cpp').catch(() => {})` (best-effort, must not throw); when `error === 'failed'`, a red note (`border-l-2 border-red-400 bg-red-50 text-red-700 px-2 py-1.5 text-sm dark:bg-red-950/30`) with a Retry `<button>` whose `onClick` calls `runAsk(lastQuestion)` (re-attempts WITHOUT echoing a new user turn — the failed user turn is still in `turns`). The composer stays rendered/usable in both cases (it already is once `pending` is false). Do NOT change the model dropdown, portal/positioning/scroll-follow, or keyboard guard. Verify with `npm --prefix dashboard run build`.
-
-- [x] Run full verification and fix any failures: `npm test`, `npm run lint`, `npm --prefix dashboard run build`.
+- [x] Run full verification and fix any failures: `npm run typecheck`, `npm run lint`, `npm test`,
+  `npm --prefix dashboard run build`.

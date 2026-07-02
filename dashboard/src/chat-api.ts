@@ -34,6 +34,9 @@ export const aiApi = {
   listModels: () =>
     fetch('/api/ai/models').then((response) => asJson<{ models: AiModel[] }>(response)),
 
+  health: () =>
+    fetch('/api/ai/health').then((response) => asJson<{ ready: boolean }>(response)),
+
   ask: (body: { model: string; messages: ChatMessage[] }) =>
     fetch('/api/ai/ask', {
       method: 'POST',

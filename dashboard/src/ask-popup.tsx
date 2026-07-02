@@ -60,6 +60,7 @@ export function AiChatPopup({
   const scrollDeltaRef = useRef(0);
   const lastScrollTopsRef = useRef(new Map<EventTarget, number>());
   const [elapsedMs, setElapsedMs] = useState(0);
+  const [warming, setWarming] = useState(false);
 
   useEffect(() => {
     openerRef.current = document.activeElement;
@@ -80,6 +81,13 @@ export function AiChatPopup({
           cur ?? (resolveInitialModel(models, localStorage.getItem(MODEL_STORAGE_KEY)) || null)
         );
       })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    aiApi
+      .health()
+      .then(({ ready }) => setWarming(!ready))
       .catch(() => {});
   }, []);
 
@@ -198,6 +206,7 @@ export function AiChatPopup({
       const { reply } = await aiApi.ask({ model, messages });
       setConversationHistory([...messages, { role: 'assistant', content: reply }]);
       setTurns((prev) => [...prev, { role: 'assistant', content: reply }]);
+      setWarming(false);
     } catch (e) {
       setError(classifyAskError(e));
     } finally {
@@ -253,6 +262,11 @@ export function AiChatPopup({
           <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
             {contextLabel}
           </span>
+          {warming && (
+            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] text-amber-700 dark:bg-amber-900/40 dark:text-amber-300">
+              warming up
+            </span>
+          )}
           {models.length > 0 && (
             <select
               value={modelId ?? ''}

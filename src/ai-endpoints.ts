@@ -33,6 +33,13 @@ export function createAiRouter(deps: AiRouterDeps): Router {
     }),
   );
 
+  router.get(
+    '/health',
+    wrap(async (_request, response) => {
+      response.json({ ready: deps.localChat.isReady() });
+    }),
+  );
+
   router.post(
     '/ask',
     wrap(async (request, response) => {
