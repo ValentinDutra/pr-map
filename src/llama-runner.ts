@@ -131,6 +131,7 @@ export function createLlamaSpawner(
 export interface LocalChat {
   listModels(): Promise<Result<ModelInfo[], LlmError>>;
   ask(request: { model: string; messages: ChatMessage[] }): Promise<Result<string, LlmError>>;
+  prewarm(model: string): Promise<Result<void, LlmError>>;
   shutdown(): Promise<void>;
   isReady(): boolean;
 }
@@ -200,6 +201,19 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
           } catch (e) {
             current = null;
             resolve(err({ code: 'request_failed', message: `ask failed: ${(e as Error).message}` }));
+          }
+        });
+      });
+    },
+
+    async prewarm(model) {
+      return new Promise((resolve) => {
+        mutex = mutex.then(async () => {
+          try {
+            resolve(await ensure(model));
+          } catch (e) {
+            current = null;
+            resolve(err({ code: 'model_load_failed', message: `prewarm failed: ${(e as Error).message}` }));
           }
         });
       });
