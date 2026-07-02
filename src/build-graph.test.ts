@@ -112,7 +112,6 @@ describe('addIncomingEdges', () => {
   const prNodes = buildNodes(sampleRawPr);
   const prFiles = sampleRawPr.files;
 
-  // A confirmed importer of lib/db.ts and a file that merely mentions "db".
   const candidateContent: Record<string, string> = {
     'src/caller.ts': "import { db } from '../lib/db';\n",
     'src/unrelated.ts': 'const db = 1;\n',

@@ -1,5 +1,3 @@
-// A small pill marking content as an AI suggestion — advisory, not a verdict.
-// Uses the same purple accent as AI-inferred graph edges so AI output reads consistently.
 export function AiSuggestionBadge({ className = '' }: { className?: string }) {
   return (
     <span

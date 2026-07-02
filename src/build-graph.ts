@@ -31,7 +31,6 @@ export function buildNodes(rawPr: RawPr): GraphNode[] {
 export interface GraphParts {
   nodes: GraphNode[];
   edges: GraphEdge[];
-  // Neighbor paths whose only candidate edge was filtered out by symbol-level affectedness.
   droppedNeighbors?: Set<string>;
 }
 
@@ -41,14 +40,10 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-// Whether `content` references `name` as a standalone identifier (treating word chars
-// and `$` as identifier characters, so `repo.createDebt` matches `createDebt`).
 function usesIdentifier(content: string, name: string): boolean {
   return new RegExp(`(^|[^\\w$])${escapeRegExp(name)}($|[^\\w$])`).test(content);
 }
 
-// The identifiers appearing on the lines a diff actually changed: each hunk header's
-// enclosing-declaration context plus every added/removed line.
 function wordsOnChangedLines(patch: string): Set<string> {
   const words = new Set<string>();
   for (const rawLine of patch.split('\n')) {
@@ -66,11 +61,7 @@ function wordsOnChangedLines(patch: string): Set<string> {
   return words;
 }
 
-// Local binding names a JS/TS file introduces by importing `specifier`
-// (named, aliased, namespace, and default forms).
 function localBindingsFor(content: string, specifier: string): string[] {
-  // `[^;]` (not `[^;\n]`) so multi-line import statements are matched; the trailing
-  // `from '<specifier>'` anchor and the per-statement `;` keep the match from bleeding.
   const statementPattern = new RegExp(
     `import\\s+([^;]*?)\\s+from\\s+['"]${escapeRegExp(specifier)}['"]`,
     'g',
@@ -84,9 +75,6 @@ function localBindingsFor(content: string, specifier: string): string[] {
     const braced = /\{([^}]*)\}/.exec(clause);
     if (braced) {
       for (const part of braced[1].split(',')) {
-        // Strip a per-specifier `type` modifier (`import { type Foo, bar }`) so the binding is
-        // `Foo`, not the keyword `type` — otherwise any changed line containing `type` would
-        // match it and keep/mislabel the edge.
         const token = part.trim().replace(/^type\s+/, '');
         if (!token) continue;
         const alias = /\bas\s+([A-Za-z_$][\w$]*)/.exec(token);
@@ -133,9 +121,6 @@ export function addOutgoingEdges(
     if (file.content === undefined) continue;
     const rule = findRule(file.path);
     if (!rule) continue;
-    // A dependency is kept only if a changed line of this file references a symbol
-    // imported from it. We can only parse those bindings for JS/TS; for other languages,
-    // or when no changed-line identifiers are detectable, fail open and keep the edge.
     const changedWords = wordsOnChangedLines(file.patch ?? '');
     const filterOutgoing =
       JS_TS_LANGUAGES.has(detectLanguage(file.path)) && changedWords.size > 0;
@@ -175,10 +160,6 @@ function importPatternsFor(prPath: string): string[] {
   const baseName = withoutExtension.slice(withoutExtension.lastIndexOf('/') + 1);
   const dottedModule = withoutExtension.replace(/\//g, '.');
   const patterns = [withoutExtension, baseName, dottedModule];
-  // An index file (src/utils/index.ts, pkg/__init__.py) is imported as its directory
-  // (`from './utils'`, `import pkg`), so also search by the directory path, its basename, and
-  // its dotted form — none of which appear in the stem patterns above. resolve() still confirms
-  // each candidate, so a broader search only finds real importers, never invents edges.
   if (baseName === 'index' || baseName === '__init__') {
     const directory = withoutExtension.slice(0, withoutExtension.lastIndexOf('/'));
     if (directory) {
@@ -212,17 +193,11 @@ export function addIncomingEdges(
 
   for (const prFile of prFiles) {
     const targetPath = prFile.path;
-    // A dependent is kept only if it uses a symbol the diff changed in this file. When we
-    // have no changed symbols for it (extraction failed/empty), fail open and keep it.
     const changedSymbols = changedSymbolsByPath?.get(targetPath);
     const filterIncoming = changedSymbols !== undefined && changedSymbols.size > 0;
-    // A renamed file may still be imported under its old path by files this PR did
-    // not touch, so search and confirm against both names.
     const names = prFile.previousPath
       ? [prFile.path, prFile.previousPath]
       : [prFile.path];
-    // The old path of a renamed file is no longer on disk, so add it to the set the
-    // resolver checks; otherwise an importer still using the old path resolves to nothing.
     const confirmFiles = new Set(repoFiles);
     for (const name of names) confirmFiles.add(name);
 

@@ -7,11 +7,8 @@ export interface FileNodeData extends Record<string, unknown> {
   inPr: boolean;
   status?: NodeStatus;
   highlighted: boolean;
-  // Number of AI-flagged risks + suspected bugs on this file (0 = none / not enriched).
   riskCount: number;
-  // True once the reviewer has checked this changed file off as viewed.
   viewed?: boolean;
-  // Set while another file is focused: the focused file itself, vs. an unrelated file to fade.
   focused?: boolean;
   dimmed?: boolean;
 }
@@ -26,7 +23,6 @@ export function FileNode({ data }: NodeProps<FileFlowNode>) {
     ? 'bg-white text-slate-800 dark:bg-slate-800 dark:text-slate-100'
     : 'bg-slate-100 text-slate-500 dark:bg-slate-800/50 dark:text-slate-400';
   const viewedBg = data.viewed ? 'bg-green-50/60 dark:bg-green-950/30' : '';
-  // One explicit border color so precedence reads top-down: risk > viewed > changed > neighbor.
   const border = isRisky
     ? 'border-red-400 dark:border-red-600'
     : data.viewed

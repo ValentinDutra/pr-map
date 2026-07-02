@@ -277,8 +277,6 @@ export function AiChatPopup({
                 setModelId(id);
                 localStorage.setItem(MODEL_STORAGE_KEY, id);
                 setWarming(true);
-                // warm() resolves only once the spawn attempt has concluded, so clear the chip
-                // whether it succeeded or failed (a failure surfaces on the next ask).
                 aiApi.warm({ model: id }).then(() => setWarming(false), () => setWarming(false));
               }}
               className="max-w-[150px] truncate rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"

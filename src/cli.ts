@@ -5,15 +5,10 @@ import { assembleGraph, writeGraph } from './build-graph.js';
 import { createGitGrep, createReadContent, listRepoFiles } from './repo-scan.js';
 import { isOk } from './result.js';
 
-// Deterministic half of the /pr-map pipeline: fetch the PR, build the static graph,
-// and write graph.json. The agent enriches that file (summaries + why + llm edges)
-// afterwards, then starts the server. Prints a JSON line with the data dir on success.
 async function main(): Promise<void> {
   const ref = process.argv[2] ?? '';
   const repoRoot = resolve(process.argv[3] ?? process.cwd());
 
-  // gh resolves {owner}/{repo} from the current directory's git remote, and git grep
-  // runs against the checked-out PR, so operate from inside the target repo.
   process.chdir(repoRoot);
 
   const ghClient = createGhClient(createDefaultExecutor());

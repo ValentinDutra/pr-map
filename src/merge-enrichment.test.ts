@@ -66,7 +66,6 @@ describe('mergeEnrichment', () => {
     );
     expect(semanticEdge).toMatchObject({ origin: 'llm', kind: 'semantic', confidence: 0.5 });
 
-    // The semantic target was not in the static graph; merge adds it as a neighbor so the edge renders.
     const semanticTarget = merged.nodes.find((candidate) => candidate.id === 'src/c.ts');
     expect(semanticTarget).toMatchObject({ inPr: false, language: 'typescript' });
   });

@@ -78,7 +78,6 @@ describe('fetchPr', () => {
       expect(result.value.files[0].content).toBe('content:src/a.ts');
       expect(result.value.files[1].content).toBeUndefined();
     }
-    // Content is fetched by the immutable head SHA, not the branch name.
     expect(contentCalls).toEqual([{ path: 'src/a.ts', ref: 'abc123sha' }]);
   });
 

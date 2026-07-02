@@ -1,6 +1,5 @@
 @import 'tailwindcss';
 
-/* Class-based dark mode: `dark:` utilities apply under a `.dark` ancestor. */
 @custom-variant dark (&:where(.dark, .dark *));
 
 :root {
@@ -14,8 +13,6 @@ body,
   margin: 0;
 }
 
-/* Minimal Prism token colors for diff syntax highlighting. Light by default, overridden under
-   the `.dark` ancestor to match the app's class-based dark mode and slate palette. */
 .token.comment,
 .token.prolog,
 .token.doctype,
@@ -103,7 +100,6 @@ body,
   color: #67e8f9;
 }
 
-/* Thinking indicator animations */
 @keyframes dot-bounce {
   0%, 80%, 100% {
     transform: translateY(0);

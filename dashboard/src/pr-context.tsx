@@ -15,8 +15,6 @@ const CHECKS_DOT: Record<ChecksState, string> = {
   pending: 'bg-amber-500',
 };
 
-// A single check's state drives its dot color; failing conclusions and the in-flight lifecycle
-// map to red/amber, everything settled and clean maps to green.
 function checkStateColor(check: ChecksSummary['checks'][number]): string {
   if (check.status === 'queued' || check.status === 'in_progress' || check.conclusion === '') {
     return 'bg-amber-500';
@@ -27,8 +25,6 @@ function checkStateColor(check: ChecksSummary['checks'][number]): string {
   return 'bg-red-500';
 }
 
-// PR-wide context (commits + checks) that used to live in the header. In the sidebar a floating
-// popover would overflow the narrow panel, so each row expands inline below itself instead.
 type OpenSection = 'commits' | 'checks' | 'discussion' | null;
 
 export function PrContextBar() {
@@ -39,8 +35,6 @@ export function PrContextBar() {
 
   useEffect(() => {
     let cancelled = false;
-    // No commits/checks endpoint (static build) or nothing on the PR: leave each null and the
-    // corresponding control hides itself.
     reviewApi
       .getCommits()
       .then((list) => {
@@ -65,8 +59,6 @@ export function PrContextBar() {
   }, []);
 
   const hasCommits = commits !== null && commits.length > 0;
-  // GitHub's combined-status endpoint reports `state: "pending"` for a commit with zero statuses,
-  // so an empty checks list would otherwise render a perpetual "pending" — hide it instead.
   const hasChecks = checks !== null && checks.checks.length > 0;
   const hasDiscussion = discussion !== null && discussion.conversationComments.length > 0;
   if (!hasCommits && !hasChecks && !hasDiscussion) return null;

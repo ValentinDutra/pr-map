@@ -33,7 +33,6 @@ export interface GraphEdge {
   origin: EdgeOrigin;
   confidence: number;
   why?: string;
-  // The changed symbol crossing this edge that made the neighbor affected (static edges only).
   affectedSymbol?: string;
 }
 
@@ -46,8 +45,6 @@ export interface PrMeta {
   author: string;
   baseRef: string;
   headRef: string;
-  // Immutable head commit SHA. Preferred over headRef (a branch name) for fetching file
-  // content, since the SHA still resolves after the branch is deleted or force-pushed.
   headSha: string;
 }
 
@@ -56,7 +53,6 @@ export interface PrGraph {
   nodes: GraphNode[];
   edges: GraphEdge[];
   generatedAt: string;
-  // Number of one-hop importers hidden because they use no symbol the diff changed.
   hiddenNeighborCount: number;
 }
 
@@ -78,11 +74,9 @@ export interface PendingComment {
 export interface ReviewState {
   prNumber: number;
   comments: PendingComment[];
-  // The review summary body (the PR-level comment) submitted together with the verdict.
   summaryBody?: string;
 }
 
-// A line-scoped review comment already posted to the PR by any reviewer (read-only).
 export interface ExistingReviewComment {
   id: number;
   path: string;
@@ -94,7 +88,6 @@ export interface ExistingReviewComment {
   inReplyToId: number | null;
 }
 
-// A PR-level (Conversation tab) comment already posted to the PR by any reviewer (read-only).
 export interface ExistingConversationComment {
   id: number;
   body: string;
@@ -102,54 +95,39 @@ export interface ExistingConversationComment {
   createdAt: string;
 }
 
-// A single comment inside a review thread, normalized from the GraphQL reviewThreads query.
 export interface ReviewThreadComment {
-  // The REST comment database id (GraphQL exposes it as databaseId); null when unavailable.
   id: number | null;
   author: string;
   body: string;
   createdAt: string;
 }
 
-// A review-comment thread on the PR, with its resolved state and the GraphQL node id needed to
-// resolve/unresolve it. Threads are the GraphQL-native grouping the REST comments list lacks.
 export interface ReviewThread {
-  // The GraphQL node id of the thread (passed to the resolve/unresolve mutations).
   id: string;
   isResolved: boolean;
   path: string;
-  // The new-file line the thread is anchored to, from the first comment's line ?? originalLine.
   line: number | null;
   comments: ReviewThreadComment[];
 }
 
-// A single commit on the PR, normalized from the pulls/{number}/commits endpoint (read-only).
 export interface CommitInfo {
   sha: string;
-  // The abbreviated SHA shown in the UI; first 7 characters of sha.
   shortSha: string;
-  // The first line of the commit message (the subject).
   message: string;
   author: string;
   date: string;
   url: string;
 }
 
-// The overall CI verdict for the PR's head commit, rolled up across every check.
 export type ChecksState = 'success' | 'failure' | 'pending';
 
-// A single CI check on the PR's head commit, normalized from both the check-runs API
-// (GitHub Actions, App checks) and the legacy combined-status API (commit statuses).
 export interface CheckRun {
   name: string;
-  // The check-runs lifecycle (queued | in_progress | completed); legacy statuses report 'completed'.
   status: string;
-  // The check-runs outcome (success | failure | …) or the legacy status state (success | failure | pending).
   conclusion: string;
   url: string | null;
 }
 
-// All checks on the PR's head commit plus the rolled-up overall verdict (read-only).
 export interface ChecksSummary {
   state: ChecksState;
   checks: CheckRun[];

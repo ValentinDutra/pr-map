@@ -7,11 +7,6 @@ import type { GraphEdge, GraphNode, PrGraph } from './types.js';
 import type { EnrichmentResult } from './merge-enrichment.js';
 import { type LlmProvider, type ProviderEnv, selectProvider } from './llm-provider.js';
 
-// Portable AI enrichment: the deterministic counterpart to Claude's pr-file-analyst subagents.
-// It builds the same per-file prompt from the static graph, calls a configured LLM provider,
-// and writes enrichment/<i>.json files in the EnrichmentResult shape that merge.js consumes —
-// so Codex, Gemini, or a standalone run get the same enrichment Claude produces via subagents.
-
 const ENRICHMENT_CONTRACT = `Return ONLY a JSON object (no prose, no markdown fences) of the form:
 {
   "files": [
@@ -32,8 +27,6 @@ function edgesTouching(graph: PrGraph, nodeId: string): GraphEdge[] {
   return graph.edges.filter((edge) => edge.source === nodeId || edge.target === nodeId);
 }
 
-// Build a single prompt covering every file in the batch, from the same inputs pr-file-analyst
-// receives: each file's diff, the edges touching it, and a one-line note about each neighbor.
 export function buildPrompt(nodes: GraphNode[], graph: PrGraph): string {
   const nodesById = new Map(graph.nodes.map((node) => [node.id, node]));
 
@@ -69,8 +62,6 @@ function stripCodeFences(text: string): string {
   return text.replace(/```(?:json)?/gi, '');
 }
 
-// Extract the first balanced-looking JSON value (object or array) from text that may have prose
-// around it — small models often wrap JSON in explanation despite instructions.
 function extractJson(text: string): string | null {
   const firstObject = text.indexOf('{');
   const firstArray = text.indexOf('[');
@@ -85,8 +76,6 @@ function extractJson(text: string): string | null {
   return text.slice(start, end + 1);
 }
 
-// Normalize a parsed response to a flat list: a bare object, a `{ files: [...] }` wrapper, or an
-// array. (Kept local so this entry's bundle never pulls in merge-enrichment's CLI side effects.)
 function flattenResults(parsed: unknown): EnrichmentResult[] {
   if (Array.isArray(parsed)) return parsed as EnrichmentResult[];
   if (parsed && typeof parsed === 'object' && Array.isArray((parsed as { files?: unknown }).files)) {
@@ -98,8 +87,6 @@ function flattenResults(parsed: unknown): EnrichmentResult[] {
   return [];
 }
 
-// Tolerant parse: strip code fences, isolate the JSON, parse, and normalize to a flat list of
-// EnrichmentResult (handles a bare object, a `{ files: [...] }` wrapper, or an array).
 export function parseEnrichmentResponse(text: string): Result<EnrichmentResult[], { message: string }> {
   const jsonText = extractJson(stripCodeFences(text).trim());
   if (jsonText === null) return err({ message: 'no JSON found in model response' });
@@ -148,17 +135,9 @@ export interface EnrichDeps {
   provider: LlmProvider;
   concurrency?: number;
   log?: (message: string) => void;
-  // Called once per batch as it finishes (in completion order, not input order) with that batch's
-  // results and the running progress. Lets a caller persist partial output and report progress as
-  // the run proceeds. A failed batch still fires this with an empty result array.
   onBatch?: (results: EnrichmentResult[], progress: BatchProgress) => void | Promise<void>;
 }
 
-// Drive enrichment over the PR's changed files. Batches like the skill (<=10 files -> one per
-// prompt; >10 -> batches of ~5), runs with bounded concurrency, and fails open per batch: a
-// provider or parse failure skips those files (logged) rather than aborting the whole run. Each
-// batch reports through onBatch the moment it finishes, so the caller can stream progress and
-// persist partial results without waiting for the slowest batch.
 export async function enrichGraph(graph: PrGraph, deps: EnrichDeps): Promise<EnrichmentResult[]> {
   const changedNodes = graph.nodes.filter((node) => node.inPr);
   if (changedNodes.length === 0) return [];
@@ -180,8 +159,6 @@ export async function enrichGraph(graph: PrGraph, deps: EnrichDeps): Promise<Enr
         results = parsed.value;
       }
     }
-    // Increment synchronously before the (possibly async) callback so progress counts can never
-    // race between concurrent batches.
     completed += 1;
     await deps.onBatch?.(results, { completed, total: batches.length });
     return results;
@@ -214,9 +191,6 @@ export async function enrichFromDir(
     ? parsedConcurrency
     : 4;
 
-  // Start from a clean enrichment directory so a previous (possibly aborted) run's files never
-  // leak into this run's merge. Failing to prepare the directory is fatal — nothing could be
-  // written — so it surfaces as an error rather than a silent empty enrichment.
   const enrichmentDir = join(dataDir, 'enrichment');
   try {
     await rm(enrichmentDir, { recursive: true, force: true });
@@ -228,11 +202,6 @@ export async function enrichFromDir(
   const changedCount = graph.nodes.filter((node) => node.inPr).length;
   console.warn(`pr-map: enriching ${changedCount} changed file(s) with concurrency ${concurrency}...`);
 
-  // Persist each batch as it finishes rather than all at the end, so an interrupted run still
-  // leaves usable partial enrichment on disk for the merge step. The cursor is advanced
-  // synchronously (before any await) so concurrent batches claim disjoint file indices. Per-file
-  // write failures are logged and skipped, never aborting the run — the same fail-open posture as
-  // the enrichment itself.
   let writeCursor = 0;
   const results = await enrichGraph(graph, {
     provider: providerResult.value,
@@ -241,9 +210,6 @@ export async function enrichFromDir(
     onBatch: async (batchResults, progress) => {
       const startIndex = writeCursor;
       writeCursor += batchResults.length;
-      // Capture the cumulative count synchronously (before the first await) so the progress line
-      // matches this batch's number even while other batches run concurrently and advance the
-      // shared cursor.
       const filesThroughHere = writeCursor;
       await Promise.all(
         batchResults.map((result, offset) =>
@@ -281,8 +247,6 @@ async function main(): Promise<void> {
   console.log(JSON.stringify(result.value));
 }
 
-// Run as a CLI only when invoked directly (not when imported by tests). realpath handles
-// macOS /var -> /private symlinks; pathToFileURL handles encoding.
 const invokedDirectly =
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;

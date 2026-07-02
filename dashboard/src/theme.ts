@@ -4,7 +4,6 @@ export type Theme = 'dark' | 'light';
 
 const STORAGE_KEY = 'pr-map-theme';
 
-// Start from the saved choice, falling back to the OS preference.
 function initialTheme(): Theme {
   const stored = localStorage.getItem(STORAGE_KEY);
   if (stored === 'dark' || stored === 'light') return stored;

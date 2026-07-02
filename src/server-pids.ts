@@ -9,7 +9,6 @@ export function writePidFile(pidFilePath: string, pid: number): void {
     mkdirSync(dirname(pidFilePath), { recursive: true });
     writeFileSync(pidFilePath, String(pid));
   } catch {
-    // Best effort: a filesystem failure must never throw into ask/spawn.
   }
 }
 
@@ -23,6 +22,5 @@ export function removePidFile(pidFilePath: string, expectedPid?: number): void {
     }
     rmSync(pidFilePath, { force: true });
   } catch {
-    // Best effort: cleanup hook handles stale files.
   }
 }

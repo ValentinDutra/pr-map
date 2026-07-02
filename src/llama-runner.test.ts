@@ -299,7 +299,6 @@ describe('createLlamaSpawner', () => {
     }
     expect(fakeChild.kill).toHaveBeenCalled();
 
-    // Prove pid file was written during cold-start (before health-ok)
     expect(writePidCalls).toHaveLength(1);
     expect(writePidCalls[0].path).toMatch(/7777-llama\.pid$/);
     expect(writePidCalls[0].pid).toBe(12345);
@@ -308,7 +307,6 @@ describe('createLlamaSpawner', () => {
   it('resolves err with code model_load_failed immediately when child exits early', async () => {
     const fakeChild = createFakeChild();
     const spawn = vi.fn(() => {
-      // Simulate child exiting early (e.g., bad GGUF path)
       setImmediate(() => fakeChild.emit('exit', 1, null));
       return fakeChild;
     });
@@ -320,7 +318,7 @@ describe('createLlamaSpawner', () => {
       spawn: spawn as unknown as typeof import('node:child_process').spawn,
       fetchFn,
       pickPort: async () => 6666,
-      readyTimeoutMs: 5000, // Long timeout - should NOT wait this long
+      readyTimeoutMs: 5000,
       pollIntervalMs: 10,
       writePid: () => {},
       removePid: () => {},
@@ -334,7 +332,6 @@ describe('createLlamaSpawner', () => {
     if (!isOk(result)) {
       expect(result.error.code).toBe('model_load_failed');
     }
-    // Should resolve quickly, not wait for readyTimeoutMs
     expect(elapsed).toBeLessThan(500);
   });
 
@@ -732,7 +729,7 @@ describe('ask/shutdown', () => {
         ok({ baseUrl: 'http://127.0.0.1:9999', stop: stopSpy }),
     );
     const providerFor = () => ({
-      chat: async () => new Promise<never>(() => {}), // Never resolves
+      chat: async () => new Promise<never>(() => {}),
       complete: async () => ok(''),
     });
 
@@ -742,17 +739,14 @@ describe('ask/shutdown', () => {
       providerFor,
     });
 
-    // Start an ask but don't await it - it will hang on chat()
     const askPromise = localChat.ask({
       model: 'm1.gguf',
       messages: [{ role: 'user', content: 'hi' }],
     });
 
-    // Let ensure/spawn settle
     await new Promise((r) => setImmediate(r));
     expect(spawnServer).toHaveBeenCalledTimes(1);
 
-    // shutdown() should resolve promptly, not wait behind the hung chat
     const startTime = Date.now();
     await localChat.shutdown();
     const elapsed = Date.now() - startTime;
@@ -760,7 +754,6 @@ describe('ask/shutdown', () => {
     expect(elapsed).toBeLessThan(100);
     expect(stopSpy).toHaveBeenCalledTimes(1);
 
-    // Clean up - the askPromise will never resolve, but that's fine for the test
     void askPromise;
   });
 
@@ -813,10 +806,8 @@ describe('ask/shutdown', () => {
         return ok({ baseUrl: 'http://127.0.0.1:9999', stop: stop1 });
       }
       if (callCount === 2) {
-        // Second call (swap to m2) throws
         throw new Error('spawn failed during swap');
       }
-      // Third call succeeds
       return ok({ baseUrl: 'http://127.0.0.1:8888', stop: vi.fn() });
     });
 
@@ -826,17 +817,13 @@ describe('ask/shutdown', () => {
       providerFor: () => createFakeProvider(),
     });
 
-    // First ask for m1 succeeds
     const r1 = await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'a' }] });
     expect(isOk(r1)).toBe(true);
 
-    // Second ask for m2 (swap) fails - spawnServer throws after stop1 was called
     const r2 = await localChat.ask({ model: 'm2.gguf', messages: [{ role: 'user', content: 'b' }] });
     expect(isOk(r2)).toBe(false);
     expect(stop1).toHaveBeenCalledTimes(1);
 
-    // Third ask for m1 again - if current wasn't reset, this would reuse the dead m1 server
-    // Instead it should spawn a new server (callCount 3)
     const r3 = await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'c' }] });
     expect(spawnServer).toHaveBeenCalledTimes(3);
     expect(isOk(r3)).toBe(true);

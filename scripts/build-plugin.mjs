@@ -1,8 +1,6 @@
 import { build } from 'esbuild';
 import { cp, mkdir, rm } from 'node:fs/promises';
 
-// Bundles the deterministic runtime into self-contained node scripts inside the plugin, so an
-// installed plugin runs with plain `node` (no npm install, no tsx). Run after the dashboard build.
 const distDir = 'pr-map-plugin/dist';
 const dashboardOut = 'pr-map-plugin/dashboard-dist';
 
@@ -22,7 +20,6 @@ await build({
   platform: 'node',
   format: 'esm',
   target: 'node20',
-  // Provide `require` for any CJS dependency (express/open) that calls require at runtime.
   banner: {
     js: "import { createRequire as __createRequire } from 'module'; const require = __createRequire(import.meta.url);",
   },

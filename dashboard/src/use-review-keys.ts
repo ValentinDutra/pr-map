@@ -1,8 +1,6 @@
 import { useEffect } from 'react';
 import { useAiChatOpen, type DetailTab } from './store';
 
-// Pure index math for file navigation, split out so it is unit-testable without the DOM.
-
 export function nextIndex(length: number, current: number): number {
   if (length === 0) return -1;
   if (current < 0) return 0;
@@ -15,7 +13,6 @@ export function prevIndex(length: number, current: number): number {
   return (current - 1 + length) % length;
 }
 
-// The next path not in `viewed`, searching forward from current+1 and wrapping. -1 if all viewed.
 export function nextUnviewedIndex(paths: string[], current: number, viewed: Set<string>): number {
   for (let step = 1; step <= paths.length; step += 1) {
     const index = (current + step) % paths.length;
@@ -39,7 +36,6 @@ export interface ReviewKeysDeps {
   onToggleHelp: () => void;
 }
 
-// Keys typed into a form control are the user's text, never shortcuts.
 function isTypingTarget(target: EventTarget | null): boolean {
   const el = target as { tagName?: string; isContentEditable?: boolean } | null;
   if (!el || !el.tagName) return false;
@@ -57,8 +53,6 @@ export function shouldHandleReviewKey(target: EventTarget | null, isAiChatOpen: 
   return true;
 }
 
-// Window-level keyboard navigation for the review loop. Lives next to the graph because that is
-// where selection and the file list already are.
 export function useReviewKeys({
   nodes,
   selectedNodeId,
