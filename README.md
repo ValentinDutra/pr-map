@@ -148,7 +148,7 @@ the chat is multi-turn, and a dropdown in the popup header switches models. Thes
 conversations are local-only and ephemeral: they are not saved with the review.
 
 If llama.cpp is not installed, no `llama-server` can start, so asking a question fails and
-the popup shows an error.
+the popup shows an amber setup note with a copyable `brew install llama.cpp` command.
 
 ## Data and .gitignore
 
