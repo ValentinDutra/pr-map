@@ -8,7 +8,9 @@ import {
 import { createPortal } from 'react-dom';
 import { aiApi } from './chat-api';
 import { buildOutgoingMessages, type ChatMessage } from './chat-messages';
+import { MODEL_STORAGE_KEY, resolveInitialModel } from './model-select';
 import { computeAnchorPosition } from './popup-position';
+import type { ModelInfo } from './types';
 
 interface AiChatPopupProps {
   anchorRect: { top: number; bottom: number; left: number };
@@ -49,6 +51,7 @@ export function AiChatPopup({
   const initialAnchorRef = useRef(anchorRect);
   const [error, setError] = useState<string | null>(null);
   const [modelId, setModelId] = useState<string | null>(null);
+  const [models, setModels] = useState<ModelInfo[]>([]);
   const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>([]);
 
   const [mounted, setMounted] = useState(false);
@@ -63,6 +66,18 @@ export function AiChatPopup({
         openerRef.current.focus();
       }
     };
+  }, []);
+
+  useEffect(() => {
+    aiApi
+      .listModels()
+      .then(({ models }) => {
+        setModels(models);
+        setModelId((cur) =>
+          cur ?? (resolveInitialModel(models, localStorage.getItem(MODEL_STORAGE_KEY)) || null)
+        );
+      })
+      .catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -168,7 +183,7 @@ export function AiChatPopup({
     setPending(true);
 
     try {
-      const model = await resolveModel();
+      const model = modelId || (await resolveModel());
       const messages = buildOutgoingMessages(conversationHistory, contextCode, question);
       const { reply } = await aiApi.ask({ model, messages });
       setConversationHistory([
@@ -218,9 +233,27 @@ export function AiChatPopup({
       }}
     >
       <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2 dark:border-slate-800">
-        <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
-          {contextLabel}
-        </span>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">
+            {contextLabel}
+          </span>
+          {models.length > 0 && (
+            <select
+              value={modelId ?? ''}
+              onChange={(e) => {
+                setModelId(e.target.value);
+                localStorage.setItem(MODEL_STORAGE_KEY, e.target.value);
+              }}
+              className="max-w-[150px] truncate rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+            >
+              {models.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.name}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
         <button
           type="button"
           onClick={onClose}

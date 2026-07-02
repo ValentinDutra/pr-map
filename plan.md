@@ -1,48 +1,44 @@
-# #58 — Orphan-safety: no stray llama-server after a hard kill
+# #60 — Model dropdown with persisted choice + server swap
 
 ## Goal
-When `ask` spawns a `llama-server` child, record its PID in the same `pr-map-server-pids`
-directory the SessionEnd cleanup hook already sweeps, so that even a `kill -9` of the node
-dashboard process (bypassing graceful shutdown) leaves no orphaned `llama-server` consuming
-RAM/GPU. The PID file is removed on graceful `shutdown()` and when the child exits.
+Let a reviewer choose which local model answers in the ask popup via a native `<select>` in the
+popup header, persist that choice to `localStorage` so it survives popup remounts and page
+reloads, and route the chosen model to `POST /api/ai/ask` (which already swaps the backend
+llama-server). An empty or failed model list degrades gracefully — the popup keeps working on the
+existing default-model resolution, no crash.
 
 ## Approach
-Extract the PID-file location and its write/remove into a small shared module
-`src/server-pids.ts` — the single source for `PID_DIR`, used by BOTH `server.ts` (the node
-process PID, one file per port) and the new llama-child PID file. The dir constant cannot live
-in `server.ts` because `server.ts` imports `./llama-runner.js` (line 11), so llama-runner
-importing from server.ts would be a cycle — the shared module is required, not merely tidy.
-Write the llama child PID **right after `spawn` returns** (not at health-ok) so a hard kill
-during the cold-start window is still cleaned up; remove it in both `RunningServer.stop()` and
-the child `exit` handler. All pid-file writes/removes are best-effort (swallow errors) so a
-filesystem failure can never throw into `ask`/spawn or wedge the ask-serialization mutex. The
-existing `pr-map-plugin/hooks/cleanup-server.sh` already globs `*.pid` and guards stale PIDs
-with `kill -0`, so it needs no change.
+Match the repo's #59 convention: extract the one piece of real logic — deciding which model to
+pre-select given the fetched list and the saved id — into a pure, unit-tested
+`dashboard/src/model-select.ts` (`resolveInitialModel`), and implement the React glue (fetching
+the list, the `<select>`, localStorage read/write, routing the choice to `ask`) as thin edits to
+`dashboard/src/ask-popup.tsx` verified by the dashboard build. There is NO React component-test
+infra and this slice does not add one; only the extracted pure function is unit-tested.
 
 ## Constraints
-- Do NOT modify `pr-map-plugin/hooks/cleanup-server.sh` — it already sweeps `$PID_DIR/*.pid` and
-  guards stale PIDs with `kill -0`, so `<port>-llama.pid` is handled for free.
-- Do NOT change the `/api/ai/*` contract, the `ask`/`shutdown` semantics, the spawn command, or
-  its flags (`llama-server -m <gguf> --port <port> --host 127.0.0.1 --no-webui`).
-- `server.ts` changes are LIMITED to sourcing `PID_DIR` and the two helpers from
-  `server-pids.ts` in place of its inline `mkdirSync`/`writeFileSync`/`rmSync`; behavior must be
-  byte-for-byte identical. Do NOT restructure `registerGracefulShutdown` or the startup flow.
-- pid-file writes and removes MUST be best-effort (wrapped in try/catch, errors swallowed) —
-  they must never throw into `ask`/spawn nor reject/hang the spawn Promise.
-- Write the llama pid file RIGHT AFTER `spawn` (covering cold start); do NOT defer it to the
-  health-ok branch.
-- Frontend is untouched (`dashboard/**`). No changes outside `src/server-pids.ts`,
-  `src/server.ts`, `src/llama-runner.ts`, and their test files.
+- Do NOT add `@testing-library/react`, jsdom, or any component-test dependency. Unit-test only
+  the extracted pure function; the popup edits are build-verified.
+- Do NOT build a custom (non-native) dropdown — use a native `<select>` (zero focus/z-index
+  risk). Styling stays minimal/slate.
+- Do NOT add cold-start indicators or the styled amber/red error states — those are #61. Keep the
+  current bare `Request failed` behavior untouched.
+- Do NOT change backend files (`src/**`) or the `/api/ai/*` contract. Frontend only under
+  `dashboard/src/**`.
+- Preserve the existing default-model behavior as the fallback: when no model is selected/available
+  the popup must still resolve a default (prefer a name containing "coder", else the first) exactly
+  as today, so a reviewer who never touches the dropdown sees no change.
+- Keep the popup's existing structure (portal, positioning, scroll-follow, multi-turn, keyboard
+  guard) unchanged — this slice only adds the header `<select>` + model state.
 
 ## Patterns to follow
-- PID-file convention (dir, one file per port, mkdir-recursive + writeFileSync, rmSync force):
-  `src/server.ts` (`PID_DIR` at line 27; write at ~156-161; `rmSync` in `registerGracefulShutdown`
-  at ~120).
-- Dependency-injection seams with real defaults + fakes in tests: `src/llama-runner.ts`
-  (`LlamaSpawnerDeps` with injected `spawn`/`fetchFn`/`pickPort`) and its tests
-  `src/llama-runner.test.ts`.
-- Cleanup hook (read-only reference, do not edit): `pr-map-plugin/hooks/cleanup-server.sh`.
-- Result/error conventions: `src/result.ts`, `src/llm-provider.ts` (`LlmError` codes).
+- Pure-function unit tests: `dashboard/src/code-context.test.ts`, `dashboard/src/chat-messages.test.ts`.
+- Existing model default-resolution to mirror: `resolveModel` in `dashboard/src/ask-popup.tsx`
+  (lines 149-157 — prefer `name` containing "coder", else `models[0]`).
+- Shared model shape: `ModelInfo` in `dashboard/src/types.ts` (line 157: `{ id; name; path }`);
+  `aiApi.listModels()` in `dashboard/src/chat-api.ts` returns `{ models }` of that shape.
+- Native-input handling for shortcuts: `isTypingTarget` already treats `SELECT` as a typing
+  target, and the open popup already suppresses all review shortcuts via `useAiChatOpen` — so no
+  keyboard-guard change is needed.
 
 ## Verification commands
 - Tests: `npm test`
@@ -50,63 +46,43 @@ with `kill -0`, so it needs no change.
 - Type check / build: `npm --prefix dashboard run build`
 
 ## Current state
-- `src/llama-runner.ts`: `createLlamaSpawner(deps)` picks a free port, spawns
-  `llama-server ... --port <port> ...` (line 61 — `child.pid` is available immediately after),
-  polls `/health`, and on ready resolves `ok({ baseUrl, stop: () => child.kill() })`. A
-  `child.on('exit')` handler exists only for the early-exit-before-ready error case. `LocalChat`
-  swaps models via `current?.server.stop()` in `ensure()` and tears down via `shutdown()`
-  (`current?.server.stop(); current = null`). No PID file is written today. `ask` serializes
-  through a promise-chain mutex; a throw inside the spawn Promise executor rejects (caught by
-  `ask`'s try/catch), but a throw inside `pollHealth` would never resolve → mutex wedge.
-- `src/server.ts`: `const PID_DIR = join(tmpdir(), 'pr-map-server-pids')` (line 27); on startup
-  writes `join(PID_DIR, `${port}.pid`)` = `String(process.pid)` via `mkdirSync(PID_DIR, {
-  recursive: true })` + `writeFileSync(...)` in a non-fatal try/catch (~156-163);
-  `registerGracefulShutdown` removes it with `rmSync(pidFile, { force: true })` (~120). Imports
-  `existsSync, mkdirSync, rmSync, writeFileSync` from `node:fs` (line 4; `existsSync` is also
-  used at line 34), and `createLocalChat` from `./llama-runner.js` (line 11).
-- `pr-map-plugin/hooks/cleanup-server.sh`: SessionEnd hook; for each `$PID_DIR/*.pid` reads the
-  PID, `kill -0` guards it, `kill`s it, and `rm`s the file.
-- `src/llama-runner.test.ts`: spawner tests inject a fake `spawn` returning a child stub
-  (EventEmitter-like with `pid`, `kill`, `on`), plus fake `fetchFn`/`pickPort`, to drive the
-  ready/early-exit/timeout paths without a real binary.
+- `dashboard/src/ask-popup.tsx`: `AiChatPopup` has state `modelId` (line 51, `string | null`);
+  `resolveModel()` (149-157) lazily fetches `aiApi.listModels()`, picks a "coder" model else the
+  first, caches it in `modelId`, and throws if none. `sendMessage` (159-184) calls
+  `const model = await resolveModel()` then `aiApi.ask({ model, messages })`. The header (220-232)
+  is `flex items-center justify-between` with a `font-mono text-[11px]` context-label chip (left)
+  and a close ✕ button (right). The popup is portaled/`fixed`, remounts per anchor (keyed), so
+  component state resets each time it opens.
+- `dashboard/src/chat-api.ts`: `aiApi.listModels(): Promise<{ models: AiModel[] }>` and
+  `aiApi.ask({ model, messages }): Promise<{ reply }>`; `AiModel = { id; name; path }`.
+- `dashboard/src/types.ts`: `ModelInfo = { id: string; name: string; path: string }` (line 157).
+- `dashboard/src/use-review-keys.ts`: `isTypingTarget` returns true for INPUT/TEXTAREA/SELECT.
 
 ## Desired end state
-- On a successful spawn, `<PID_DIR>/<port>-llama.pid` contains the llama-server child PID,
-  written immediately after `spawn` (before health polling completes).
-- That file is removed when the server is stopped (`RunningServer.stop()`, hence on model swap
-  and on `shutdown()`) AND when the child process emits `exit`.
-- After `kill -9` of the node process, the file remains; running `cleanup-server.sh` kills the
-  recorded llama PID (`kill -0`-guarded) and removes the file, so `pgrep llama-server` returns
-  nothing.
-- All pid-file write/remove failures are swallowed; `ask`/`shutdown`/spawn behavior and the
-  `/api/ai/*` contract are unchanged.
-- `PID_DIR` and the write/remove helpers have a single home in `src/server-pids.ts`, imported by
-  both `server.ts` and `llama-runner.ts`.
+- The popup header shows a native `<select>` listing every model from `aiApi.listModels()`, to the
+  left of the close ✕, alongside the context chip.
+- Opening the popup pre-selects the model saved in `localStorage` (if still in the list), else the
+  "coder"-preferred default, else the first model.
+- Changing the `<select>` persists the id to `localStorage`; a later open or a page reload
+  pre-selects it.
+- Asking routes the selected `{ model }` to `/api/ai/ask` (observably answered by the chosen model).
+- An empty or failed model list renders no `<select>` and does not crash; `sendMessage` falls back
+  to the existing default resolution.
 
 ## Edge cases and risks
-- A throw inside the spawn Promise executor rejects the promise (caught by `ask`); a throw
-  inside `pollHealth` never resolves and wedges the mutex — so the pid write must be guarded and
-  sit right after `spawn`, outside any path that could leave the promise unresolved.
-- Writing only at health-ok would leave the cold-start seconds untracked — write right after
-  `spawn`.
-- `removePidFile` must be idempotent (`rmSync` with `force: true`), since it is called from both
-  `stop()` and the `exit` handler, and may run when no file was ever written (early spawn
-  failure) or when it was already removed.
-- The existing ready-path spawner tests reach the resolve branch; with the REAL default helpers
-  they would litter real pid files under `tmpdir()` — those tests must inject no-op
-  `writePid`/`removePid`.
-- Model swap / concurrent dashboards: one file per port; `ensure()`'s `stop()` removes the prior
-  port's file on swap.
-- Criterion "kill -9 node → `pgrep llama-server` empty" is a MANUAL/integration check (a human
-  starts the dashboard, does one `ask`, `kill -9`s node, runs the hook) — it is NOT automated
-  here; unit tests must not spawn real processes.
+- The popup remounts per anchor, so model state resets on every open — persistence MUST come from
+  `localStorage` (read on mount), not component state.
+- A saved id that is no longer in the returned list must NOT be selected — fall back to the default.
+- `aiApi.listModels()` can reject (backend/llama down) — the mount fetch must swallow errors
+  (empty list, no crash) and `sendMessage` must still resolve a default via the existing path.
+- The `<select>` must not trigger global review shortcuts — already handled (`isTypingTarget`
+  covers SELECT and the open popup suppresses shortcuts); do not regress this.
+- No streaming/no new endpoints; backend swap latency is the ask-endpoint's concern, not this slice.
 
 ## Tasks
 
-- [x] Create `src/server-pids.ts` and refactor `src/server.ts` to use it (behavior-preserving). New file `src/server-pids.ts` exports: `export const PID_DIR = join(tmpdir(), 'pr-map-server-pids');` (import `tmpdir` from `node:os`, `join`/`dirname` from `node:path`); `export function writePidFile(pidFilePath: string, pid: number): void` that, wrapped in a `try/catch` that swallows errors, does `mkdirSync(dirname(pidFilePath), { recursive: true })` then `writeFileSync(pidFilePath, String(pid))` (import `mkdirSync`/`writeFileSync`/`rmSync` from `node:fs`); and `export function removePidFile(pidFilePath: string): void` that, in a `try/catch` swallowing errors, does `rmSync(pidFilePath, { force: true })`. Then edit `src/server.ts`: delete the local `const PID_DIR = ...` (line 27) and import `{ PID_DIR, writePidFile, removePidFile }` from `./server-pids.js`; replace the inline `mkdirSync(PID_DIR, { recursive: true })` + `writeFileSync(pidFile, String(process.pid))` block with a single `writePidFile(pidFile, process.pid)` (the helper is already best-effort — you may drop the now-redundant surrounding try/catch, keeping the same non-fatal behavior); replace the `rmSync(pidFile, { force: true })` in `registerGracefulShutdown` with `removePidFile(pidFile)`; remove `mkdirSync, rmSync, writeFileSync` from the `node:fs` import on line 4 (KEEP `existsSync`, still used at line 34); and remove `tmpdir` from the `node:os` import on line 5 (KEEP `homedir`, still used at line 143) since deleting `PID_DIR` removes its only use — `@typescript-eslint/no-unused-vars` is an error, so leaving it would fail the lint gate. Do NOT change `registerGracefulShutdown`'s signature or the startup order. Write `src/server-pids.test.ts` (Vitest, following the style of `src/llama-runner.test.ts`): create a unique temp dir with `mkdtempSync(join(tmpdir(), 'pr-map-pids-'))`; assert (a) `writePidFile(join(dir, 'sub', '123.pid'), 123)` creates the missing parent dir and the file contains `'123'`; (b) `removePidFile` deletes an existing file; (c) `removePidFile` on a non-existent path does NOT throw; (d) `writePidFile` to an un-writable path (e.g. a path whose parent is an existing regular file) does NOT throw (best-effort). Run `npm test`.
+- [x] Create the pure initial-model resolver. New file `dashboard/src/model-select.ts` exporting `export const MODEL_STORAGE_KEY = 'pr-map-ai-model';` and `export function resolveInitialModel(models: ModelInfo[], savedId: string | null): string` (import `ModelInfo` from `./types`). Return: `savedId` when it is non-empty AND some `models[i].id === savedId`; else the id of the first model whose `name.toLowerCase()` includes `'coder'`; else `models[0]?.id`; else `''` (empty string = no model). This mirrors the existing `resolveModel` default (ask-popup.tsx:152-153) plus the saved-preference. Write `dashboard/src/model-select.test.ts` following `dashboard/src/chat-messages.test.ts`: assert (a) a `savedId` present in the list is returned; (b) a `savedId` NOT in the list falls back to the coder-named model's id; (c) with no coder model, the first model's id is returned; (d) an empty list returns `''`; (e) a `null` savedId with a coder model returns the coder id. Run `npm test`.
 
-- [x] Now that `src/server-pids.ts` exists, track the llama-server child PID in the spawner. In `src/llama-runner.ts`: import `{ PID_DIR, writePidFile, removePidFile }` from `./server-pids.js` (`join` is already imported from `node:path`). Extend `LlamaSpawnerDeps` with two optional seams: `writePid?: (pidFilePath: string, pid: number) => void;` and `removePid?: (pidFilePath: string) => void;`, and in `createLlamaSpawner` default them to `deps.writePid ?? writePidFile` and `deps.removePid ?? removePidFile`. In the returned spawner, immediately AFTER the spawn `try/catch` block (after line 64, in the outer function scope — NOT inside the `try` — so it is visible to the Promise executor below), and before the `return new Promise(...)`, compute `const pidFilePath = join(PID_DIR, `${port}-llama.pid`);` and, guarded by `if (child.pid !== undefined)`, call `writePid(pidFilePath, child.pid)`. Add a `child.on('exit', () => removePid(pidFilePath));` listener (in ADDITION to the existing early-exit error handler — do not remove or alter that one). Change the ready-path resolve from `stop: () => child.kill()` to `stop: () => { child.kill(); removePid(pidFilePath); }`. Do NOT write the pid file in the health-ok branch, and do NOT change the spawn flags, health polling, timeout, or error resolution. Extend `src/llama-runner.test.ts`: add tests that inject fake `writePid`/`removePid` spies (arrays recording their args) alongside the existing fake `spawn`/`fetchFn`/`pickPort` that drive a spawn to READY, and assert: (a) `writePid` was called once with a `pidFilePath` ending in `${port}-llama.pid` and the fake child's `pid`; (b) calling the resolved `RunningServer.stop()` calls `removePid` with that same path; (c) emitting the fake child's `exit` event calls `removePid` with that path. ALSO update any EXISTING spawner test that reaches the ready path to pass no-op `writePid: () => {}` / `removePid: () => {}` in its deps so it does not write real pid files under `tmpdir()`. Run `npm test`.
+- [x] Now that `resolveInitialModel` exists, wire the model dropdown into the popup (build-verified UI — verify with `npm --prefix dashboard run build`; NO component test, do NOT add a component-test dependency). In `dashboard/src/ask-popup.tsx`: import `{ MODEL_STORAGE_KEY, resolveInitialModel }` from `./model-select` and `type ModelInfo` from `./types`. Add state `const [models, setModels] = useState<ModelInfo[]>([]);`. On mount, fetch the list and initialize the selection with a `useEffect(() => { aiApi.listModels().then(({ models }) => { setModels(models); setModelId((cur) => cur ?? (resolveInitialModel(models, localStorage.getItem(MODEL_STORAGE_KEY)) || null)); }).catch(() => {}); }, [])` — the `.catch(() => {})` makes a failed list a no-op (empty models, no crash). In the header (the `flex items-center justify-between` div at ~line 220), wrap the existing context-label chip together with a new native `<select>` in a left-side `<div className="flex items-center gap-2 min-w-0">` (keep the close ✕ button on the right, unchanged). Render the `<select>` ONLY when `models.length > 0`: `<select value={modelId ?? ''} onChange={(e) => { setModelId(e.target.value); localStorage.setItem(MODEL_STORAGE_KEY, e.target.value); }} className="max-w-[150px] truncate rounded border border-slate-200 bg-white px-1.5 py-0.5 text-[11px] text-slate-600 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300">{models.map((m) => (<option key={m.id} value={m.id}>{m.name}</option>))}</select>`. In `sendMessage`, change `const model = await resolveModel();` to `const model = modelId || (await resolveModel());` so a chosen model is used and the existing default resolution remains the fallback when none is selected. Do NOT remove `resolveModel` (it is the fallback) and do NOT change the popup's portal/positioning/scroll-follow/multi-turn/keyboard-guard code. Verify with `npm --prefix dashboard run build` and confirm at rest the popup is unchanged when there are 0 models (no `<select>` rendered).
 
-- [x] Run full verification and fix any failures: `npm test`, `npm run lint`, `npm run typecheck`. Note that the acceptance criterion "start the dashboard, trigger one `ask`, `kill -9` the node server, run the SessionEnd hook → `pgrep llama-server` returns nothing" is a MANUAL integration check performed by a human — do NOT attempt to automate it by spawning real processes.
-- [x] Fix the port-reuse orphan race: make llama pid-file removal content-aware so a dead child cannot delete a live child's pid file. Background: `stop()` on a model swap kills child A and removes its `${port}-llama.pid` fire-and-forget (it does not await A's exit); if the OS then reuses A's just-freed port for child B, B writes the same `${port}-llama.pid`, and A's late `exit` handler then deletes B's file — B becomes invisible to the cleanup hook and a `kill -9` orphans it. In `src/server-pids.ts`, change the signature to `export function removePidFile(pidFilePath: string, expectedPid?: number): void`: inside the existing best-effort `try/catch`, when `expectedPid !== undefined`, `readFileSync(pidFilePath, 'utf8').trim()` (import `readFileSync` from `node:fs`) and RETURN without deleting if it does not equal `String(expectedPid)`; otherwise `rmSync(pidFilePath, { force: true })` as before. When `expectedPid` is undefined the behavior is unchanged (unconditional `rmSync force`) so `server.ts`'s node-pid removal is unaffected. In `src/llama-runner.ts`: change the seam type to `removePid?: (pidFilePath: string, expectedPid?: number) => void;` (default still `removePidFile`); capture `const spawnedPid = child.pid;` once after the spawn try/catch, and gate BOTH the write and the removals on it — i.e. `if (spawnedPid !== undefined) { writePid(pidFilePath, spawnedPid); child.on('exit', () => removePid(pidFilePath, spawnedPid)); }` — and change the ready-path resolve to `stop: () => { child.kill(); if (spawnedPid !== undefined) removePid(pidFilePath, spawnedPid); }`. Keep the write RIGHT AFTER spawn (not health-ok) and do NOT touch the spawn/health/timeout logic or the existing early-exit `error` handler. Extend `src/server-pids.test.ts`: (e) `removePidFile(path, matchingPid)` deletes the file when its content equals that pid; (f) `removePidFile(path, otherPid)` leaves the file in place when the content differs. The existing remove-on-stop / remove-on-exit tests in `src/llama-runner.test.ts` keep passing (their `removePid` spies record the path and may ignore the new 2nd arg); adjust them only if they break. Run `npm test`, `npm run lint`, `npm run typecheck`.
-- [x] Add a discriminating write-timing test so a regression that deferred the pid write into the health-ok branch cannot pass unnoticed. In `src/llama-runner.test.ts`, the existing test "resolves err with code model_load_failed and kills child when health never returns ok" (around line 267, `pickPort: async () => 7777`, `readyTimeoutMs: 50`) currently injects `writePid: () => {}`. Change it to inject a RECORDING `writePid` that pushes `{ path, pid }` to a local array (mirroring the write-on-spawn test near line 196), keep `removePid: () => {}` (or a recording no-op), and — after awaiting the result and keeping the existing assertion that it is the `model_load_failed` error — additionally assert the recording array has length 1, its `path` matches `/7777-llama\.pid$/`, and its `pid` equals the fake child's pid (`12345`). This proves the pid file is written on the never-ready (cold-start) path; moving `writePid` into the health-ok branch would make this fail. Do NOT change any source file. Run `npm test`, `npm run lint`, `npm run typecheck`.
+- [x] Run full verification and fix any failures: `npm test`, `npm run lint`, `npm --prefix dashboard run build`.
