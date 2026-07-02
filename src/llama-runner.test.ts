@@ -572,6 +572,31 @@ describe('ask/shutdown', () => {
     void askPromise;
   });
 
+  it('isReady returns false before any ask, true after successful ask, false after shutdown', async () => {
+    const spawnServer = vi.fn(
+      async (): Promise<Result<RunningServer, LlmError>> =>
+        ok({ baseUrl: 'http://127.0.0.1:1', stop: () => {} }),
+    );
+    const providerFor = () => ({
+      chat: async () => ok('hi'),
+      complete: async () => ok('hi'),
+    });
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor,
+    });
+
+    expect(localChat.isReady()).toBe(false);
+
+    await localChat.ask({ model: 'm', messages: [{ role: 'user', content: 'x' }] });
+    expect(localChat.isReady()).toBe(true);
+
+    await localChat.shutdown();
+    expect(localChat.isReady()).toBe(false);
+  });
+
   it('resets current when spawnServer throws during swap so same-model ask respawns', async () => {
     const stop1 = vi.fn();
     let callCount = 0;

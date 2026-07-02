@@ -132,6 +132,7 @@ export interface LocalChat {
   listModels(): Promise<Result<ModelInfo[], LlmError>>;
   ask(request: { model: string; messages: ChatMessage[] }): Promise<Result<string, LlmError>>;
   shutdown(): Promise<void>;
+  isReady(): boolean;
 }
 
 export interface LocalChatOptions {
@@ -207,6 +208,10 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
     async shutdown() {
       current?.server.stop();
       current = null;
+    },
+
+    isReady() {
+      return current !== null;
     },
   };
 }
