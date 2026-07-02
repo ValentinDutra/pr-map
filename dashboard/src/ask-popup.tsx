@@ -6,6 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
+import { thinkingPhase, COLD_COPY, COLD_SLOW_COPY } from './ask-status';
 import { aiApi } from './chat-api';
 import { buildOutgoingMessages, type ChatMessage } from './chat-messages';
 import { MODEL_STORAGE_KEY, resolveInitialModel } from './model-select';
@@ -57,6 +58,7 @@ export function AiChatPopup({
   const [mounted, setMounted] = useState(false);
   const scrollDeltaRef = useRef(0);
   const lastScrollTopsRef = useRef(new Map<EventTarget, number>());
+  const [elapsedMs, setElapsedMs] = useState(0);
 
   useEffect(() => {
     openerRef.current = document.activeElement;
@@ -139,6 +141,21 @@ export function AiChatPopup({
       conversationRef.current.scrollTop = conversationRef.current.scrollHeight;
     }
   }, [turns, pending]);
+
+  useEffect(() => {
+    if (!pending) {
+      setElapsedMs(0);
+      return;
+    }
+    const start = Date.now();
+    const interval = setInterval(() => {
+      setElapsedMs(Date.now() - start);
+    }, 300);
+    return () => {
+      clearInterval(interval);
+      setElapsedMs(0);
+    };
+  }, [pending]);
 
   useEffect(() => {
     const handleClickOutside = (event: PointerEvent) => {
@@ -285,9 +302,31 @@ export function AiChatPopup({
             </div>
           ),
         )}
-        {pending && (
-          <div className="text-sm text-slate-500 dark:text-slate-400">Thinking...</div>
-        )}
+        {pending && (() => {
+          const phase = thinkingPhase(elapsedMs);
+          if (phase === 'warm') {
+            return prefersReducedMotion ? (
+              <div className="text-sm text-slate-500 dark:text-slate-400">Thinking...</div>
+            ) : (
+              <div className="flex gap-1 text-slate-400 dark:text-slate-500">
+                <span className="thinking-dot" />
+                <span className="thinking-dot" />
+                <span className="thinking-dot" />
+              </div>
+            );
+          }
+          const copy = phase === 'cold' ? COLD_COPY : COLD_SLOW_COPY;
+          return (
+            <div className="flex flex-col gap-1.5">
+              <div
+                className={`h-1.5 w-24 rounded-full ${
+                  prefersReducedMotion ? 'thinking-shimmer-reduced' : 'thinking-shimmer'
+                }`}
+              />
+              <span className="text-xs text-slate-500 dark:text-slate-400">{copy}</span>
+            </div>
+          );
+        })()}
         {error && (
           <div className="text-sm text-red-600 dark:text-red-400">{error}</div>
         )}
