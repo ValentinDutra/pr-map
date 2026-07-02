@@ -125,6 +125,31 @@ always an explicit action you take in the UI — pr-map never submits on your be
 You cannot Approve or Request changes on your own PR — GitHub rejects self-reviews of
 that kind. Use Comment instead when reviewing a PR you authored.
 
+## Ask a local model about the code (optional)
+
+While reading a diff you can ask a small **local** model about a specific line, without
+leaving the dashboard. It is fully local and entirely optional — nothing about it is
+required to review a PR.
+
+**Prerequisites.** Install llama.cpp so its `llama-server` binary is on your `PATH` — on
+macOS, `brew install llama.cpp` — and drop one or more GGUF model files under `~/models`.
+pr-map scans that directory recursively; set `PRMAP_MODELS_DIR` to scan a different one.
+Files whose name starts with `mmproj-` (vision projectors) are skipped, so only chat
+models are listed.
+
+You do not manage the server. pr-map discovers the models it finds there, and when you
+pick one it spawns a local `llama-server` bound to `127.0.0.1` for that GGUF, swapping to
+a different server when you choose a different model.
+
+**Using it during review.** Hover a diff line and click the model icon in the gutter (next
+to the `+` comment button; its tooltip reads "Ask a local model about this line"). A popup
+opens anchored to that line with the selected code as context. Type a question and Send —
+the chat is multi-turn, and a dropdown in the popup header switches models. These
+conversations are local-only and ephemeral: they are not saved with the review.
+
+If llama.cpp is not installed, no `llama-server` can start, so asking a question fails and
+the popup shows an amber setup note with a copyable `brew install llama.cpp` command.
+
 ## Data and .gitignore
 
 pr-map writes its working data under the target repository at
