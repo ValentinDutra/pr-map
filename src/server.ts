@@ -1,14 +1,15 @@
 import express, { type Express } from 'express';
 import type { Server } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { homedir, tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import openBrowser from 'open';
 import { createAiRouter } from './ai-endpoints.js';
 import { createGhClient, createDefaultExecutor, type GhClient } from './gh-client.js';
 import { createLocalChat, type LocalChat } from './llama-runner.js';
+import { PID_DIR, removePidFile, writePidFile } from './server-pids.js';
 import {
   createReviewRouter,
   createExistingRouter,
@@ -21,10 +22,6 @@ import {
 import type { PrGraph } from './types.js';
 
 const DEFAULT_PORT = 5598;
-// One PID file per server, named by port, under a shared directory — so concurrent dashboards
-// (reviewing two PRs at once) don't clobber each other's PID. The SessionEnd cleanup hook kills
-// every PID in this directory.
-const PID_DIR = join(tmpdir(), 'pr-map-server-pids');
 
 // Resolve the dashboard whether running bundled (pr-map-plugin/dist/server.js, dashboard at
 // ../dashboard-dist) or from source in dev (src/server.js, dashboard at ../dashboard/dist).
@@ -116,11 +113,7 @@ function registerGracefulShutdown(
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`pr-map dashboard shutting down (${signal})`);
-    try {
-      rmSync(pidFile, { force: true });
-    } catch {
-      // Best effort: the cleanup hook also removes stale PID files.
-    }
+    removePidFile(pidFile);
     try {
       await shutdownLocalChat();
     } catch {
@@ -155,13 +148,7 @@ export async function startServer(
       const server = await listen(app, port);
       const pidFile = join(PID_DIR, `${port}.pid`);
       registerGracefulShutdown(server, pidFile, () => localChat.shutdown());
-      // Record the PID (one file per port) so the SessionEnd cleanup hook can find and kill it.
-      try {
-        mkdirSync(PID_DIR, { recursive: true });
-        writeFileSync(pidFile, String(process.pid));
-      } catch {
-        // Non-fatal: cleanup hook just won't find a pid file.
-      }
+      writePidFile(pidFile, process.pid);
       const url = `http://localhost:${port}`;
       console.log(`pr-map dashboard ready at ${url}`);
       if (process.env.PRMAP_NO_OPEN !== '1') {
