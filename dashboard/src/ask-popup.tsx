@@ -6,7 +6,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
-import { thinkingPhase, COLD_COPY, COLD_SLOW_COPY } from './ask-status';
+import { classifyAskError, thinkingPhase, COLD_COPY, COLD_SLOW_COPY } from './ask-status';
 import { aiApi } from './chat-api';
 import { buildOutgoingMessages, type ChatMessage } from './chat-messages';
 import { MODEL_STORAGE_KEY, resolveInitialModel } from './model-select';
@@ -50,7 +50,8 @@ export function AiChatPopup({
   const [turns, setTurns] = useState<Turn[]>([]);
   const [pending, setPending] = useState(false);
   const initialAnchorRef = useRef(anchorRect);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<'unavailable' | 'failed' | null>(null);
+  const [lastQuestion, setLastQuestion] = useState('');
   const [modelId, setModelId] = useState<string | null>(null);
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>([]);
@@ -188,31 +189,29 @@ export function AiChatPopup({
     return id;
   };
 
-  const sendMessage = async () => {
-    if (!input.trim() || pending) return;
-
-    const question = input.trim();
-    setInput('');
+  const runAsk = async (question: string) => {
     setError(null);
-
-    const userTurn: Turn = { role: 'user', content: question };
-    setTurns((prev) => [...prev, userTurn]);
     setPending(true);
-
     try {
       const model = modelId || (await resolveModel());
       const messages = buildOutgoingMessages(conversationHistory, contextCode, question);
       const { reply } = await aiApi.ask({ model, messages });
-      setConversationHistory([
-        ...messages,
-        { role: 'assistant', content: reply },
-      ]);
+      setConversationHistory([...messages, { role: 'assistant', content: reply }]);
       setTurns((prev) => [...prev, { role: 'assistant', content: reply }]);
-    } catch {
-      setError('Request failed');
+    } catch (e) {
+      setError(classifyAskError(e));
     } finally {
       setPending(false);
     }
+  };
+
+  const sendMessage = () => {
+    if (!input.trim() || pending) return;
+    const question = input.trim();
+    setInput('');
+    setTurns((prev) => [...prev, { role: 'user', content: question }]);
+    setLastQuestion(question);
+    void runAsk(question);
   };
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLTextAreaElement>) => {
@@ -327,8 +326,38 @@ export function AiChatPopup({
             </div>
           );
         })()}
-        {error && (
-          <div className="text-sm text-red-600 dark:text-red-400">{error}</div>
+        {error === 'unavailable' && (
+          <div className="border-l-2 border-amber-400 bg-amber-50 px-2 py-1.5 text-sm dark:bg-amber-950/30">
+            <p className="text-amber-800 dark:text-amber-200">
+              llama.cpp is not installed. Run:
+            </p>
+            <div className="mt-1 flex items-center gap-2">
+              <code className="rounded bg-amber-100 px-1.5 py-0.5 text-xs text-amber-900 dark:bg-amber-900/50 dark:text-amber-100">
+                brew install llama.cpp
+              </code>
+              <button
+                type="button"
+                onClick={() => {
+                  navigator.clipboard?.writeText('brew install llama.cpp').catch(() => {});
+                }}
+                className="rounded px-1.5 py-0.5 text-xs text-amber-700 hover:bg-amber-100 dark:text-amber-300 dark:hover:bg-amber-900/50"
+              >
+                Copy
+              </button>
+            </div>
+          </div>
+        )}
+        {error === 'failed' && (
+          <div className="border-l-2 border-red-400 bg-red-50 px-2 py-1.5 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">
+            <p>Request failed.</p>
+            <button
+              type="button"
+              onClick={() => void runAsk(lastQuestion)}
+              className="mt-1 rounded bg-red-100 px-2 py-0.5 text-xs text-red-800 hover:bg-red-200 dark:bg-red-900/50 dark:text-red-200 dark:hover:bg-red-800/50"
+            >
+              Retry
+            </button>
+          </div>
         )}
       </div>
 
