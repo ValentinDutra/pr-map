@@ -44,6 +44,36 @@ describe('selectProvider', () => {
     expect(isOk(result)).toBe(false);
     if (!isOk(result)) expect(result.error.code).toBe('request_failed');
   });
+
+  it('honors a numeric PRMAP_LLM_TIMEOUT_MS by aborting the request at that timeout', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init: RequestInit) =>
+          new Promise((_resolve, reject) => {
+            init.signal?.addEventListener('abort', () =>
+              reject(Object.assign(new Error('aborted'), { name: 'AbortError' })),
+            );
+          }),
+      ),
+    );
+
+    try {
+      const selected = selectProvider({ PRMAP_LLM_TIMEOUT_MS: '5' });
+      expect(isOk(selected)).toBe(true);
+      if (!isOk(selected)) return;
+
+      const result = await selected.value.chat([{ role: 'user', content: 'hi' }]);
+
+      expect(isOk(result)).toBe(false);
+      if (!isOk(result)) {
+        expect(result.error.code).toBe('request_failed');
+        expect(result.error.message).toContain('timed out after 5ms');
+      }
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
 
 describe('createOllamaProvider chat', () => {
@@ -181,5 +211,27 @@ describe('createOpenAiCompatibleProvider chat', () => {
 
     expect(isOk(result)).toBe(false);
     if (!isOk(result)) expect(result.error.code).toBe('request_failed');
+  });
+
+  it('complete delegates to chat with a single user message', async () => {
+    let postedBody: unknown;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (_url: string, init: RequestInit) => {
+        postedBody = JSON.parse(init.body as string);
+        return new Response(JSON.stringify({ choices: [{ message: { content: 'done' } }] }), { status: 200 });
+      }),
+    );
+
+    const provider = createOpenAiCompatibleProvider({
+      model: 'gpt-4o-mini',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+    });
+    const result = await provider.complete('hi');
+
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) expect(result.value).toBe('done');
+    expect((postedBody as { messages: unknown[] }).messages).toEqual([{ role: 'user', content: 'hi' }]);
   });
 });
