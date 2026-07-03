@@ -39,3 +39,12 @@ jobs:
 
       - name: Build plugin bundle
         run: npm run build:plugin
+
+      - name: Check committed plugin bundle is up to date
+        run: |
+          if [ -n "$(git status --porcelain -- pr-map-plugin)" ]; then
+            git status --porcelain -- pr-map-plugin
+            git --no-pager diff -- pr-map-plugin | head -100
+            echo "Committed pr-map-plugin bundle is out of date. Run npm run build:plugin and commit the result."
+            exit 1
+          fi
