@@ -680,4 +680,66 @@ describe('ask/shutdown', () => {
     expect(isOk(result)).toBe(true);
     expect(spawnServer).toHaveBeenCalledTimes(1);
   });
+
+  it('prewarm returns the spawn err and leaves isReady false when spawnServer returns err', async () => {
+    const spawnServer = vi.fn(
+      async (): Promise<Result<RunningServer, LlmError>> =>
+        err({ code: 'llama_not_found', message: 'not installed' }),
+    );
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const result = await localChat.prewarm('m');
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('llama_not_found');
+    }
+    expect(localChat.isReady()).toBe(false);
+  });
+
+  it('prewarm returns model_load_failed and leaves isReady false when spawnServer throws', async () => {
+    const spawnServer = vi.fn(async (): Promise<Result<RunningServer, LlmError>> => {
+      throw new Error('spawn exploded');
+    });
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const result = await localChat.prewarm('m');
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('model_load_failed');
+    }
+    expect(localChat.isReady()).toBe(false);
+  });
+
+  it('ask after a failed prewarm respawns and succeeds (mutex not poisoned)', async () => {
+    let callCount = 0;
+    const spawnServer = vi.fn(async (): Promise<Result<RunningServer, LlmError>> => {
+      callCount++;
+      if (callCount === 1) {
+        throw new Error('transient failure');
+      }
+      return ok({ baseUrl: 'http://127.0.0.1:9999', stop: vi.fn() });
+    });
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const prewarmResult = await localChat.prewarm('m');
+    expect(isOk(prewarmResult)).toBe(false);
+
+    const askResult = await localChat.ask({ model: 'm', messages: [{ role: 'user', content: 'hi' }] });
+    expect(isOk(askResult)).toBe(true);
+    expect(spawnServer).toHaveBeenCalledTimes(2);
+  });
 });
