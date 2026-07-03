@@ -44,8 +44,9 @@ export function createAiRouter(deps: AiRouterDeps): Router {
 
   router.get(
     '/health',
-    wrap(async (_request, response) => {
-      response.json({ ready: deps.localChat.isReady() });
+    wrap(async (request, response) => {
+      const model = typeof request.query.model === 'string' ? request.query.model : undefined;
+      response.json({ ready: deps.localChat.isReady(model) });
     }),
   );
 

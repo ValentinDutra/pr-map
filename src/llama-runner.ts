@@ -133,7 +133,7 @@ export interface LocalChat {
   ask(request: { model: string; messages: ChatMessage[] }): Promise<Result<string, LlmError>>;
   prewarm(model: string): Promise<Result<void, LlmError>>;
   shutdown(): Promise<void>;
-  isReady(): boolean;
+  isReady(model?: string): boolean;
 }
 
 export interface LocalChatOptions {
@@ -230,8 +230,9 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
       current = null;
     },
 
-    isReady() {
-      return current !== null;
+    isReady(model?: string) {
+      if (model === undefined) return current !== null;
+      return current?.model === model;
     },
   };
 }
