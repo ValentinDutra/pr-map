@@ -1,9 +1,14 @@
 import { Router, type Request, type Response } from 'express';
 import type { LocalChat } from './llama-runner.js';
+import type { LlmErrorCode } from './llm-provider.js';
 import { isOk } from './result.js';
 
 export interface AiRouterDeps {
   localChat: LocalChat;
+}
+
+export function statusForAskError(code: LlmErrorCode): number {
+  return code === 'llama_not_found' ? 503 : 502;
 }
 
 type AsyncHandler = (request: Request, response: Response) => Promise<void>;
@@ -64,10 +69,10 @@ export function createAiRouter(deps: AiRouterDeps): Router {
       const result = await deps.localChat.ask({ model, messages });
       if (isOk(result)) {
         response.json({ reply: result.value });
-      } else if (result.error.code === 'llama_not_found') {
-        response.status(503).json({ error: result.error.message, code: result.error.code });
       } else {
-        response.status(502).json({ error: result.error.message, code: result.error.code });
+        response
+          .status(statusForAskError(result.error.code))
+          .json({ error: result.error.message, code: result.error.code });
       }
     }),
   );
