@@ -190,8 +190,7 @@ export function AiChatPopup({
   const resolveModel = async (): Promise<string> => {
     if (modelId) return modelId;
     const { models } = await aiApi.listModels();
-    const coder = models.find((m) => m.name.toLowerCase().includes('coder'));
-    const id = coder?.id ?? models[0]?.id;
+    const id = resolveInitialModel(models, localStorage.getItem(MODEL_STORAGE_KEY));
     if (!id) throw new Error('No AI models available');
     setModelId(id);
     return id;
