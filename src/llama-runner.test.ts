@@ -497,6 +497,63 @@ describe('ask/shutdown', () => {
     expect(stopSpy).toHaveBeenCalledTimes(1);
   });
 
+  it('stops a spawn that resolves after shutdown and leaves current null', async () => {
+    const stopSpy = vi.fn();
+    let resolveSpawn: (result: Result<RunningServer, LlmError>) => void = () => {};
+    const spawnServer = vi.fn(
+      () =>
+        new Promise<Result<RunningServer, LlmError>>((resolve) => {
+          resolveSpawn = resolve;
+        }),
+    );
+
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const askPromise = localChat.ask({
+      model: 'm1.gguf',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    await new Promise((r) => setImmediate(r));
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+
+    await localChat.shutdown();
+
+    resolveSpawn(ok({ baseUrl: 'http://127.0.0.1:9999', stop: stopSpy }));
+    const result = await askPromise;
+
+    expect(stopSpy).toHaveBeenCalledTimes(1);
+    expect(localChat.isReady()).toBe(false);
+    expect(isOk(result)).toBe(false);
+
+    await localChat.shutdown();
+    expect(stopSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('fails fast for an ask entered after shutdown without spawning', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    await localChat.shutdown();
+
+    const result = await localChat.ask({
+      model: 'm1.gguf',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    expect(isOk(result)).toBe(false);
+    expect(spawnServer).not.toHaveBeenCalled();
+    expect(localChat.isReady()).toBe(false);
+  });
+
   it('does not poison the mutex when spawnServer throws (subsequent asks succeed)', async () => {
     let callCount = 0;
     const spawnServer = vi.fn(async (): Promise<Result<RunningServer, LlmError>> => {

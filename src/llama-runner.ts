@@ -160,8 +160,13 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
 
   let current: { model: string; server: RunningServer } | null = null;
   let mutex: Promise<void> = Promise.resolve();
+  let shuttingDown = false;
 
   async function ensure(model: string): Promise<Result<void, LlmError>> {
+    if (shuttingDown) {
+      return err({ code: 'model_load_failed', message: 'local chat is shutting down' });
+    }
+
     if (current?.model === model) {
       return ok(undefined);
     }
@@ -179,6 +184,11 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
     if (!isOk(result)) {
       current = null;
       return result;
+    }
+
+    if (shuttingDown) {
+      result.value.stop();
+      return err({ code: 'model_load_failed', message: 'local chat is shutting down' });
     }
 
     const server = result.value;
@@ -237,6 +247,7 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
     },
 
     async shutdown() {
+      shuttingDown = true;
       current?.server.stop();
       current = null;
     },
