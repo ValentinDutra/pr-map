@@ -179,3 +179,71 @@ body,
 .dark .thinking-shimmer-reduced {
   background-color: rgba(100, 116, 139, 0.4);
 }
+
+.react-flow__edge-path {
+  transition: stroke-width 150ms ease, opacity 150ms ease, filter 150ms ease;
+}
+
+.react-flow__edge.pr-edge-static .react-flow__edge-path {
+  stroke: #0284c7;
+}
+.dark .react-flow__edge.pr-edge-static .react-flow__edge-path {
+  stroke: #38bdf8;
+}
+.react-flow__edge.pr-edge-ai .react-flow__edge-path {
+  stroke: #9333ea;
+  stroke-dasharray: 6 4;
+}
+.dark .react-flow__edge.pr-edge-ai .react-flow__edge-path {
+  stroke: #c084fc;
+}
+
+.react-flow__edge.pr-edge-static.animated .react-flow__edge-path {
+  filter: drop-shadow(0 0 3px rgba(2, 132, 199, 0.4));
+}
+.dark .react-flow__edge.pr-edge-static.animated .react-flow__edge-path {
+  filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.55));
+}
+.react-flow__edge.pr-edge-ai.animated .react-flow__edge-path {
+  filter: drop-shadow(0 0 3px rgba(192, 38, 214, 0.4));
+}
+.dark .react-flow__edge.pr-edge-ai.animated .react-flow__edge-path {
+  filter: drop-shadow(0 0 3px rgba(232, 121, 249, 0.55));
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .react-flow__edge.pr-edge-static:hover .react-flow__edge-path {
+    stroke-width: 2.25 !important;
+    filter: drop-shadow(0 0 3px rgba(2, 132, 199, 0.4));
+  }
+  .dark .react-flow__edge.pr-edge-static:hover .react-flow__edge-path {
+    filter: drop-shadow(0 0 3px rgba(56, 189, 248, 0.55));
+  }
+  .react-flow__edge.pr-edge-ai:hover .react-flow__edge-path {
+    stroke-width: 2.25 !important;
+    filter: drop-shadow(0 0 3px rgba(192, 38, 214, 0.4));
+  }
+  .dark .react-flow__edge.pr-edge-ai:hover .react-flow__edge-path {
+    filter: drop-shadow(0 0 3px rgba(232, 121, 249, 0.55));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .react-flow__edge.animated .react-flow__edge-path {
+    animation: none;
+  }
+}
+
+.react-flow__edge-text {
+  fill: #475569;
+}
+.react-flow__edge-textbg {
+  fill: #ffffff;
+  fill-opacity: 0.85;
+}
+.dark .react-flow__edge-text {
+  fill: #cbd5e1;
+}
+.dark .react-flow__edge-textbg {
+  fill: #1e293b;
+}
