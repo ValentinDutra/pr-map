@@ -22,6 +22,7 @@ function createLocalChat(options: LocalChatOptions): LocalChat {
     removeRegistry: () => {},
     probe: async () => true,
     killPid: () => {},
+    pidAlive: () => false,
     env: {},
     ...options,
   });
@@ -1120,7 +1121,7 @@ describe('ask/shutdown', () => {
     expect(spawnServer).toHaveBeenCalledTimes(1);
   });
 
-  it('removes a stale registry entry whose probe fails and spawns fresh', async () => {
+  it('deregisters an unhealthy entry with a dead pid without killing it and spawns fresh', async () => {
     const killed: number[] = [];
     const spawnServer = vi.fn(
       async (): Promise<Result<RunningServer, LlmError>> =>
@@ -1134,19 +1135,47 @@ describe('ask/shutdown', () => {
       providerFor: () => createFakeProvider(),
       ...registry.seams,
       probe: async () => false,
+      pidAlive: () => false,
       killPid: (pid) => killed.push(pid),
     });
 
     const result = await localChat.ask({ model: 'm.gguf', messages: [{ role: 'user', content: 'hi' }] });
 
     expect(isOk(result)).toBe(true);
-    expect(killed).toContain(888);
+    expect(killed).not.toContain(888);
     expect(registry.map.has(8400)).toBe(false);
     expect(registry.map.get(8500)).toEqual({ pid: 333, port: 8500, model: 'm.gguf' });
     expect(spawnServer).toHaveBeenCalledTimes(1);
   });
 
-  it('re-probes an adopted server on the next ask and respawns when it is unhealthy', async () => {
+  it('leaves an unhealthy entry with a live pid untouched and spawns a fresh server', async () => {
+    const killed: number[] = [];
+    const spawnServer = vi.fn(
+      async (): Promise<Result<RunningServer, LlmError>> =>
+        ok({ baseUrl: 'http://127.0.0.1:8900', pid: 666, stop: vi.fn() }),
+    );
+    const registry = memoryRegistry();
+    registry.map.set(8800, { pid: 777, port: 8800, model: 'm.gguf' });
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+      ...registry.seams,
+      probe: async () => false,
+      pidAlive: () => true,
+      killPid: (pid) => killed.push(pid),
+    });
+
+    const result = await localChat.ask({ model: 'm.gguf', messages: [{ role: 'user', content: 'hi' }] });
+
+    expect(isOk(result)).toBe(true);
+    expect(killed).toEqual([]);
+    expect(registry.map.get(8800)).toEqual({ pid: 777, port: 8800, model: 'm.gguf' });
+    expect(registry.map.get(8900)).toEqual({ pid: 666, port: 8900, model: 'm.gguf' });
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves the adopted entry in place on re-probe failure and respawns when it is unhealthy', async () => {
     const spawnServer = vi.fn(
       async (): Promise<Result<RunningServer, LlmError>> =>
         ok({ baseUrl: 'http://127.0.0.1:8700', pid: 444, stop: vi.fn() }),
@@ -1163,6 +1192,7 @@ describe('ask/shutdown', () => {
         probeCount += 1;
         return probeCount === 1;
       },
+      pidAlive: () => true,
     });
 
     const first = await localChat.ask({ model: 'm.gguf', messages: [{ role: 'user', content: 'a' }] });
@@ -1172,7 +1202,7 @@ describe('ask/shutdown', () => {
     const second = await localChat.ask({ model: 'm.gguf', messages: [{ role: 'user', content: 'b' }] });
     expect(isOk(second)).toBe(true);
     expect(spawnServer).toHaveBeenCalledTimes(1);
-    expect(registry.map.has(8600)).toBe(false);
+    expect(registry.map.get(8600)).toEqual({ pid: 555, port: 8600, model: 'm.gguf' });
     expect(registry.map.get(8700)).toEqual({ pid: 444, port: 8700, model: 'm.gguf' });
   });
 });

@@ -25159,7 +25159,7 @@ function createLocalChat(options) {
   const removeRegistry = options.removeRegistry ?? ((port) => removeServerRegistry(join2(PID_DIR, `${port}-llama.json`)));
   const probe = options.probe ?? (async (healthUrl) => {
     try {
-      const response = await fetch(healthUrl);
+      const response = await fetch(healthUrl, { signal: AbortSignal.timeout(2e3) });
       if (!response.ok) return false;
       const body = await response.json();
       return body.status === "ok";
@@ -25171,6 +25171,14 @@ function createLocalChat(options) {
     try {
       process.kill(pid);
     } catch {
+    }
+  });
+  const pidAlive = options.pidAlive ?? ((pid) => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch (e) {
+      return e.code !== "ESRCH";
     }
   });
   const env = options.env ?? process.env;
@@ -25201,7 +25209,6 @@ function createLocalChat(options) {
       if (await probe(`${current.server.baseUrl}/health`)) {
         return ok(void 0);
       }
-      releaseRegistration(current.server);
       current = null;
     }
     const resolvedDir = resolve(options.modelsDir);
@@ -25212,7 +25219,8 @@ function createLocalChat(options) {
     current?.server.stop();
     current = null;
     for (const entry of listRegistry()) {
-      if (current === null && entry.model === model && await probe(`http://127.0.0.1:${entry.port}/health`)) {
+      const healthy = await probe(`http://127.0.0.1:${entry.port}/health`);
+      if (current === null && healthy && entry.model === model) {
         const { pid, port } = entry;
         current = {
           model,
@@ -25228,8 +25236,12 @@ function createLocalChat(options) {
         };
         continue;
       }
-      killPid(entry.pid);
-      removeRegistry(entry.port);
+      if (healthy) {
+        killPid(entry.pid);
+        removeRegistry(entry.port);
+      } else if (!pidAlive(entry.pid)) {
+        removeRegistry(entry.port);
+      }
     }
     if (current !== null) {
       return ok(void 0);

@@ -152,6 +152,7 @@ export interface LocalChatOptions {
   removeRegistry?: (port: number) => void;
   probe?: (healthUrl: string) => Promise<boolean>;
   killPid?: (pid: number) => void;
+  pidAlive?: (pid: number) => boolean;
   env?: NodeJS.ProcessEnv;
 }
 
@@ -180,7 +181,7 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
     options.probe ??
     (async (healthUrl: string) => {
       try {
-        const response = await fetch(healthUrl);
+        const response = await fetch(healthUrl, { signal: AbortSignal.timeout(2000) });
         if (!response.ok) return false;
         const body = (await response.json()) as { status?: string };
         return body.status === 'ok';
@@ -194,6 +195,16 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
       try {
         process.kill(pid);
       } catch {
+      }
+    });
+  const pidAlive =
+    options.pidAlive ??
+    ((pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch (e) {
+        return (e as NodeJS.ErrnoException).code !== 'ESRCH';
       }
     });
   const env = options.env ?? process.env;
@@ -229,7 +240,6 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
       if (await probe(`${current.server.baseUrl}/health`)) {
         return ok(undefined);
       }
-      releaseRegistration(current.server);
       current = null;
     }
 
@@ -243,7 +253,8 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
     current = null;
 
     for (const entry of listRegistry()) {
-      if (current === null && entry.model === model && (await probe(`http://127.0.0.1:${entry.port}/health`))) {
+      const healthy = await probe(`http://127.0.0.1:${entry.port}/health`);
+      if (current === null && healthy && entry.model === model) {
         const { pid, port } = entry;
         current = {
           model,
@@ -256,8 +267,12 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
         };
         continue;
       }
-      killPid(entry.pid);
-      removeRegistry(entry.port);
+      if (healthy) {
+        killPid(entry.pid);
+        removeRegistry(entry.port);
+      } else if (!pidAlive(entry.pid)) {
+        removeRegistry(entry.port);
+      }
     }
 
     if (current !== null) {
