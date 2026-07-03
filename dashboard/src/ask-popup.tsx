@@ -248,7 +248,7 @@ export function AiChatPopup({
   return createPortal(
     <div
       ref={popupRef}
-      className="fixed z-40 flex w-[360px] max-h-[min(60vh,420px)] flex-col rounded-md border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
+      className="fixed z-40 flex w-[360px] max-h-[min(60vh,420px)] flex-col rounded-md border border-slate-200 bg-white text-slate-900 shadow-lg dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
       style={{
         top: position.top,
         left: position.left,
