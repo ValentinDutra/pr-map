@@ -742,4 +742,80 @@ describe('ask/shutdown', () => {
     expect(isOk(askResult)).toBe(true);
     expect(spawnServer).toHaveBeenCalledTimes(2);
   });
+
+  it('rejects a traversal model id for ask without spawning', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const result = await localChat.ask({
+      model: '../outside.gguf',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('model_load_failed');
+    }
+    expect(spawnServer).not.toHaveBeenCalled();
+  });
+
+  it('rejects a traversal model id for prewarm without spawning', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const result = await localChat.prewarm('../outside.gguf');
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('model_load_failed');
+    }
+    expect(spawnServer).not.toHaveBeenCalled();
+    expect(localChat.isReady()).toBe(false);
+  });
+
+  it('rejects an absolute model path without spawning', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const result = await localChat.ask({
+      model: '/etc/passwd',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('model_load_failed');
+    }
+    expect(spawnServer).not.toHaveBeenCalled();
+  });
+
+  it('spawns for a legitimate nested model id under the models directory', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const result = await localChat.ask({
+      model: 'subdir/model.gguf',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    expect(isOk(result)).toBe(true);
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+    expect(spawnServer).toHaveBeenCalledWith(join('/models', 'subdir/model.gguf'));
+  });
 });
