@@ -19,6 +19,7 @@ dashboard/dist/
 
 # Autonomous run artifacts (ralph loop + /deliver reviewer). Ephemeral, not for the PR.
 .ralph-task.md
+plan.md
 learnings.txt
 review-notes.txt
 review-findings.md

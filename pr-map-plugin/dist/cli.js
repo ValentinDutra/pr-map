@@ -154,8 +154,6 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       if (!isOk(raw)) return raw;
       return ok(raw.value.trim());
     },
-    // File-level comments are not accepted by the bulk reviews endpoint, so they go through
-    // the standalone review-comment endpoint, which needs the head commit_id and subject_type.
     createFileComment(prNumber, commitId, path2, body) {
       return runWrite(
         [
@@ -200,9 +198,6 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       if (!isOk(raw)) return raw;
       return parseConversationComments(raw.value);
     },
-    // Review threads (the resolved/unresolved grouping) only exist in GraphQL. The {owner}/{repo}
-    // placeholders are populated by gh from the current repository, the same context the REST
-    // calls above rely on, so this method needs nothing beyond the PR number.
     async listReviewThreads(prNumber) {
       const raw = await run([
         "api",
@@ -239,11 +234,6 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
         `query=${UNRESOLVE_THREAD_MUTATION}`
       ]);
     },
-    // Checks live in two GitHub surfaces: the check-runs API (GitHub Actions, App checks)
-    // and the legacy combined-status API (commit statuses). Both hang off the head commit,
-    // so resolve the SHA first, then merge the two responses into one normalized summary.
-    // gh api always exits 0 on success, unlike `gh pr checks` which exits non-zero on
-    // pending/failing checks and would surface as a GhError.
     async listChecks(prNumber) {
       const headSha = await this.getHeadSha(prNumber);
       if (!isOk(headSha)) return headSha;
@@ -299,8 +289,6 @@ function parseReviewComments(raw) {
     parsed.value.map((comment) => ({
       id: comment.id,
       path: comment.path,
-      // GitHub returns line on the current diff, falling back to original_line when the
-      // commented line is outdated against the latest push.
       line: comment.line ?? comment.original_line,
       side: comment.side === "LEFT" ? "LEFT" : "RIGHT",
       body: comment.body,
@@ -335,10 +323,7 @@ function parseReviewThreads(raw) {
       return {
         id: thread.id,
         isResolved: thread.isResolved,
-        // Every comment in a thread shares the same path; take it from the first one.
         path: firstComment?.path ?? "",
-        // The thread anchors to the first comment's current-diff line, falling back to the
-        // original line when the line is outdated against the latest push.
         line: firstComment ? firstComment.line ?? firstComment.originalLine : null,
         comments: thread.comments.nodes.map((comment) => ({
           id: comment.databaseId,
@@ -357,9 +342,7 @@ function parseCommits(raw) {
     parsed.value.map((commit) => ({
       sha: commit.sha,
       shortSha: commit.sha.slice(0, 7),
-      // Only the subject line; the body (after the first newline) is dropped for the list view.
       message: commit.commit.message.split("\n")[0],
-      // The git-author name from the commit, falling back to the GitHub login when absent.
       author: commit.commit.author?.name ?? commit.author?.login ?? "",
       date: commit.commit.author?.date ?? "",
       url: commit.html_url
@@ -389,8 +372,6 @@ function parseChecks(checkRunsRaw, combinedStatusRaw) {
     })),
     ...statuses.map((status) => ({
       name: status.context,
-      // Legacy statuses have no lifecycle field; map their state onto status/conclusion so the
-      // rollup treats a pending status as in-flight and a non-pending one as completed.
       status: status.state === "pending" ? "in_progress" : "completed",
       conclusion: status.state === "pending" ? "" : status.state,
       url: status.target_url ?? null

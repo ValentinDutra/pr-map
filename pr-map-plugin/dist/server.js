@@ -34,7 +34,7 @@ var __toESM = (mod, isNodeMode, target) => (target = mod != null ? __create(__ge
 // node_modules/depd/index.js
 var require_depd = __commonJS({
   "node_modules/depd/index.js"(exports, module) {
-    var relative = __require("path").relative;
+    var relative2 = __require("path").relative;
     module.exports = depd;
     var basePath = process.cwd();
     function containsNamespace(str, namespace) {
@@ -226,7 +226,7 @@ var require_depd = __commonJS({
       return formatted;
     }
     function formatLocation(callSite) {
-      return relative(basePath, callSite[0]) + ":" + callSite[1] + ":" + callSite[2];
+      return relative2(basePath, callSite[0]) + ":" + callSite[1] + ":" + callSite[2];
     }
     function getStack() {
       var limit = Error.stackTraceLimit;
@@ -4942,12 +4942,12 @@ var require_raw_body = __commonJS({
       var limit = bytes.parse(opts.limit);
       var length = opts.length != null && !isNaN(opts.length) ? parseInt(opts.length, 10) : null;
       if (done) {
-        return readStream(stream, encoding, length, limit, wrap2(done));
+        return readStream(stream, encoding, length, limit, wrap3(done));
       }
-      return new Promise(function executor(resolve2, reject) {
+      return new Promise(function executor(resolve3, reject) {
         readStream(stream, encoding, length, limit, function onRead(err2, buf) {
           if (err2) return reject(err2);
-          resolve2(buf);
+          resolve3(buf);
         });
       });
     }
@@ -5068,7 +5068,7 @@ var require_raw_body = __commonJS({
         return {};
       }
     }
-    function wrap2(fn) {
+    function wrap3(fn) {
       var res;
       if (asyncHooks.AsyncResource) {
         res = new asyncHooks.AsyncResource(fn.name || "bound-anonymous-fn");
@@ -5153,7 +5153,7 @@ var require_on_finished = __commonJS({
         defer(listener, null, msg);
         return msg;
       }
-      attachListener(msg, wrap2(listener));
+      attachListener(msg, wrap3(listener));
       return msg;
     }
     function isFinished(msg) {
@@ -5228,7 +5228,7 @@ var require_on_finished = __commonJS({
         return {};
       }
     }
-    function wrap2(fn) {
+    function wrap3(fn) {
       var res;
       if (asyncHooks.AsyncResource) {
         res = new asyncHooks.AsyncResource(fn.name || "bound-anonymous-fn");
@@ -18910,7 +18910,7 @@ var require_router = __commonJS({
       var done = restore(out, req, "baseUrl", "next", "params");
       req.next = next;
       if (req.method === "OPTIONS") {
-        done = wrap2(done, function(old, err2) {
+        done = wrap3(done, function(old, err2) {
           if (err2 || options.length === 0) return old(err2);
           sendOptionsResponse(res, options, old);
         });
@@ -19210,7 +19210,7 @@ var require_router = __commonJS({
         next(err2);
       }
     }
-    function wrap2(old, fn) {
+    function wrap3(old, fn) {
       return function proxy() {
         var args = new Array(arguments.length + 1);
         args[0] = old;
@@ -19278,11 +19278,11 @@ var require_view = __commonJS({
     var debug = require_src3()("express:view");
     var path2 = __require("path");
     var fs6 = __require("fs");
-    var dirname = path2.dirname;
-    var basename = path2.basename;
+    var dirname3 = path2.dirname;
+    var basename2 = path2.basename;
     var extname = path2.extname;
-    var join3 = path2.join;
-    var resolve2 = path2.resolve;
+    var join5 = path2.join;
+    var resolve3 = path2.resolve;
     module.exports = View;
     function View(name, options) {
       var opts = options || {};
@@ -19316,9 +19316,9 @@ var require_view = __commonJS({
       debug('lookup "%s"', name);
       for (var i = 0; i < roots.length && !path3; i++) {
         var root = roots[i];
-        var loc = resolve2(root, name);
-        var dir = dirname(loc);
-        var file = basename(loc);
+        var loc = resolve3(root, name);
+        var dir = dirname3(loc);
+        var file = basename2(loc);
         path3 = this.resolve(dir, file);
       }
       return path3;
@@ -19327,14 +19327,14 @@ var require_view = __commonJS({
       debug('render "%s"', this.path);
       this.engine(this.path, options, callback);
     };
-    View.prototype.resolve = function resolve3(dir, file) {
+    View.prototype.resolve = function resolve4(dir, file) {
       var ext = this.ext;
-      var path3 = join3(dir, file);
+      var path3 = join5(dir, file);
       var stat = tryStat(path3);
       if (stat && stat.isFile()) {
         return path3;
       }
-      path3 = join3(dir, basename(file, ext), "index" + ext);
+      path3 = join5(dir, basename2(file, ext), "index" + ext);
       stat = tryStat(path3);
       if (stat && stat.isFile()) {
         return path3;
@@ -19415,7 +19415,7 @@ var require_content_disposition = __commonJS({
     "use strict";
     module.exports = contentDisposition;
     module.exports.parse = parse;
-    var basename = __require("path").basename;
+    var basename2 = __require("path").basename;
     var Buffer3 = require_safe_buffer().Buffer;
     var ENCODE_URL_ATTR_CHAR_REGEXP = /[\x00-\x20"'()*,/:;<=>?@[\\\]{}\x7f]/g;
     var HEX_ESCAPE_REGEXP = /%[0-9A-Fa-f]{2}/;
@@ -19451,9 +19451,9 @@ var require_content_disposition = __commonJS({
       if (typeof fallback === "string" && NON_LATIN1_REGEXP.test(fallback)) {
         throw new TypeError("fallback must be ISO-8859-1 string");
       }
-      var name = basename(filename);
+      var name = basename2(filename);
       var isQuotedString = TEXT_REGEXP.test(name);
-      var fallbackName = typeof fallback !== "string" ? fallback && getlatin1(name) : basename(fallback);
+      var fallbackName = typeof fallback !== "string" ? fallback && getlatin1(name) : basename2(fallback);
       var hasFallback = typeof fallbackName === "string" && fallbackName !== name;
       if (hasFallback || !isQuotedString || HEX_ESCAPE_REGEXP.test(name)) {
         params["filename*"] = name;
@@ -20391,10 +20391,10 @@ var require_send = __commonJS({
     var Stream = __require("stream");
     var util = __require("util");
     var extname = path2.extname;
-    var join3 = path2.join;
+    var join5 = path2.join;
     var normalize = path2.normalize;
-    var resolve2 = path2.resolve;
-    var sep = path2.sep;
+    var resolve3 = path2.resolve;
+    var sep2 = path2.sep;
     var BYTES_RANGE_REGEXP = /^ *bytes=/;
     var MAX_MAXAGE = 60 * 60 * 24 * 365 * 1e3;
     var UP_PATH_REGEXP = /(?:^|[\\/])\.\.(?:[\\/]|$)/;
@@ -20430,7 +20430,7 @@ var require_send = __commonJS({
       this._maxage = opts.maxAge || opts.maxage;
       this._maxage = typeof this._maxage === "string" ? ms(this._maxage) : Number(this._maxage);
       this._maxage = !isNaN(this._maxage) ? Math.min(Math.max(0, this._maxage), MAX_MAXAGE) : 0;
-      this._root = opts.root ? resolve2(opts.root) : null;
+      this._root = opts.root ? resolve3(opts.root) : null;
       if (!this._root && opts.from) {
         this.from(opts.from);
       }
@@ -20454,7 +20454,7 @@ var require_send = __commonJS({
       return this;
     }, "send.index: pass index as option");
     SendStream.prototype.root = function root(path3) {
-      this._root = resolve2(String(path3));
+      this._root = resolve3(String(path3));
       debug("root %s", this._root);
       return this;
     };
@@ -20602,23 +20602,23 @@ var require_send = __commonJS({
       var parts;
       if (root !== null) {
         if (path3) {
-          path3 = normalize("." + sep + path3);
+          path3 = normalize("." + sep2 + path3);
         }
         if (UP_PATH_REGEXP.test(path3)) {
           debug('malicious path "%s"', path3);
           this.error(403);
           return res;
         }
-        parts = path3.split(sep);
-        path3 = normalize(join3(root, path3));
+        parts = path3.split(sep2);
+        path3 = normalize(join5(root, path3));
       } else {
         if (UP_PATH_REGEXP.test(path3)) {
           debug('malicious path "%s"', path3);
           this.error(403);
           return res;
         }
-        parts = normalize(path3).split(sep);
-        path3 = resolve2(path3);
+        parts = normalize(path3).split(sep2);
+        path3 = resolve3(path3);
       }
       if (containsDotFile(parts)) {
         var access = this._dotfiles;
@@ -20715,7 +20715,7 @@ var require_send = __commonJS({
       var self = this;
       debug('stat "%s"', path3);
       fs6.stat(path3, function onstat(err2, stat) {
-        if (err2 && err2.code === "ENOENT" && !extname(path3) && path3[path3.length - 1] !== sep) {
+        if (err2 && err2.code === "ENOENT" && !extname(path3) && path3[path3.length - 1] !== sep2) {
           return next(err2);
         }
         if (err2) return self.onStatError(err2);
@@ -20745,7 +20745,7 @@ var require_send = __commonJS({
           if (err2) return self.onStatError(err2);
           return self.error(404);
         }
-        var p = join3(path3, self._index[i]);
+        var p = join5(path3, self._index[i]);
         debug('stat "%s"', p);
         fs6.stat(p, function(err3, stat) {
           if (err3) return next(err3);
@@ -21885,7 +21885,7 @@ var require_application = __commonJS({
   "node_modules/express/lib/application.js"(exports, module) {
     "use strict";
     var finalhandler = require_finalhandler();
-    var Router2 = require_router();
+    var Router3 = require_router();
     var methods = require_methods();
     var middleware = require_init();
     var query = require_query();
@@ -21898,7 +21898,7 @@ var require_application = __commonJS({
     var deprecate = require_depd()("express");
     var flatten = require_array_flatten();
     var merge = require_utils_merge();
-    var resolve2 = __require("path").resolve;
+    var resolve3 = __require("path").resolve;
     var setPrototypeOf = require_setprototypeof();
     var hasOwnProperty = Object.prototype.hasOwnProperty;
     var slice = Array.prototype.slice;
@@ -21937,7 +21937,7 @@ var require_application = __commonJS({
       this.mountpath = "/";
       this.locals.settings = this.settings;
       this.set("view", View);
-      this.set("views", resolve2("views"));
+      this.set("views", resolve3("views"));
       this.set("jsonp callback name", "callback");
       if (env === "production") {
         this.enable("view cache");
@@ -21950,7 +21950,7 @@ var require_application = __commonJS({
     };
     app.lazyrouter = function lazyrouter() {
       if (!this._router) {
-        this._router = new Router2({
+        this._router = new Router3({
           caseSensitive: this.enabled("case sensitive routing"),
           strict: this.enabled("strict routing")
         });
@@ -23169,7 +23169,7 @@ var require_response = __commonJS({
     var encodeUrl = require_encodeurl();
     var escapeHtml = require_escape_html();
     var http = __require("http");
-    var isAbsolute = require_utils2().isAbsolute;
+    var isAbsolute2 = require_utils2().isAbsolute;
     var onFinished = require_on_finished();
     var path2 = __require("path");
     var statuses = require_statuses();
@@ -23182,7 +23182,7 @@ var require_response = __commonJS({
     var send = require_send();
     var extname = path2.extname;
     var mime = send.mime;
-    var resolve2 = path2.resolve;
+    var resolve3 = path2.resolve;
     var vary = require_vary();
     var res = Object.create(http.ServerResponse.prototype);
     module.exports = res;
@@ -23375,7 +23375,7 @@ var require_response = __commonJS({
         done = options;
         opts = {};
       }
-      if (!opts.root && !isAbsolute(path3)) {
+      if (!opts.root && !isAbsolute2(path3)) {
         throw new TypeError("path must be absolute or specify root to res.sendFile");
       }
       var pathname = encodeURI(path3);
@@ -23441,7 +23441,7 @@ var require_response = __commonJS({
       }
       opts = Object.create(opts);
       opts.headers = headers;
-      var fullPath = !opts.root ? resolve2(path3) : path3;
+      var fullPath = !opts.root ? resolve3(path3) : path3;
       return this.sendFile(fullPath, opts, done);
     };
     res.contentType = res.type = function contentType(type) {
@@ -23707,7 +23707,7 @@ var require_serve_static = __commonJS({
     var encodeUrl = require_encodeurl();
     var escapeHtml = require_escape_html();
     var parseUrl = require_parseurl();
-    var resolve2 = __require("path").resolve;
+    var resolve3 = __require("path").resolve;
     var send = require_send();
     var url = __require("url");
     module.exports = serveStatic;
@@ -23727,7 +23727,7 @@ var require_serve_static = __commonJS({
         throw new TypeError("option setHeaders must be function");
       }
       opts.maxage = opts.maxage || opts.maxAge || 0;
-      opts.root = resolve2(root);
+      opts.root = resolve3(root);
       var onDirectory = redirect ? createRedirectDirectoryListener() : createNotFoundDirectoryListener();
       return function serveStatic2(req, res, next) {
         if (req.method !== "GET" && req.method !== "HEAD") {
@@ -23814,7 +23814,7 @@ var require_express = __commonJS({
     var mixin = require_merge_descriptors();
     var proto = require_application();
     var Route = require_route();
-    var Router2 = require_router();
+    var Router3 = require_router();
     var req = require_request();
     var res = require_response();
     exports = module.exports = createApplication;
@@ -23837,7 +23837,7 @@ var require_express = __commonJS({
     exports.request = req;
     exports.response = res;
     exports.Route = Route;
-    exports.Router = Router2;
+    exports.Router = Router3;
     exports.json = bodyParser.json;
     exports.query = require_query();
     exports.raw = bodyParser.raw;
@@ -23883,11 +23883,11 @@ var require_express2 = __commonJS({
 });
 
 // src/server.ts
-var import_express2 = __toESM(require_express2(), 1);
+var import_express3 = __toESM(require_express2(), 1);
 import { readFile as readFile2 } from "node:fs/promises";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join as join2, resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { homedir } from "node:os";
+import { join as join4, resolve as resolve2 } from "node:path";
 import { fileURLToPath as fileURLToPath2 } from "node:url";
 
 // node_modules/open/index.js
@@ -24323,14 +24323,14 @@ var baseOpen = async (options) => {
   }
   const subprocess = childProcess.spawn(command, cliArguments, childProcessOptions);
   if (options.wait) {
-    return new Promise((resolve2, reject) => {
+    return new Promise((resolve3, reject) => {
       subprocess.once("error", reject);
       subprocess.once("close", (exitCode) => {
         if (!options.allowNonzeroExitCode && exitCode > 0) {
           reject(new Error(`Exited with code ${exitCode}`));
           return;
         }
-        resolve2(subprocess);
+        resolve3(subprocess);
       });
     });
   }
@@ -24404,8 +24404,8 @@ defineLazyProperty(apps, "browser", () => "browser");
 defineLazyProperty(apps, "browserPrivate", () => "browserPrivate");
 var open_default = open;
 
-// src/gh-client.ts
-import { spawn } from "node:child_process";
+// src/ai-endpoints.ts
+var import_express = __toESM(require_express2(), 1);
 
 // src/result.ts
 function ok(value) {
@@ -24417,6 +24417,76 @@ function err(error) {
 function isOk(result) {
   return result.ok;
 }
+
+// src/ai-endpoints.ts
+function statusForAskError(code) {
+  return code === "llama_not_found" ? 503 : 502;
+}
+function isModelIdShapeValid(model) {
+  return !model.startsWith("/") && !model.split("/").includes("..");
+}
+function wrap(handler) {
+  return (request, response) => {
+    handler(request, response).catch((error) => {
+      if (!response.headersSent) {
+        response.status(500).json({ error: error.message });
+      }
+    });
+  };
+}
+function createAiRouter(deps) {
+  const router = (0, import_express.Router)();
+  router.get(
+    "/models",
+    wrap(async (_request, response) => {
+      const result = await deps.localChat.listModels();
+      if (isOk(result)) {
+        response.json({ models: result.value });
+      } else {
+        response.status(500).json({ error: result.error.message });
+      }
+    })
+  );
+  router.get(
+    "/health",
+    wrap(async (request, response) => {
+      const model = typeof request.query.model === "string" ? request.query.model : void 0;
+      response.json({ ready: deps.localChat.isReady(model) });
+    })
+  );
+  router.post(
+    "/warm",
+    wrap(async (request, response) => {
+      const { model } = request.body;
+      if (typeof model !== "string" || !isModelIdShapeValid(model)) {
+        response.status(400).json({ error: "model (string) is required" });
+        return;
+      }
+      const result = await deps.localChat.prewarm(model);
+      response.json({ ready: isOk(result) });
+    })
+  );
+  router.post(
+    "/ask",
+    wrap(async (request, response) => {
+      const { model, messages } = request.body;
+      if (typeof model !== "string" || !isModelIdShapeValid(model) || !Array.isArray(messages)) {
+        response.status(400).json({ error: "model (string) and messages (array) are required" });
+        return;
+      }
+      const result = await deps.localChat.ask({ model, messages });
+      if (isOk(result)) {
+        response.json({ reply: result.value });
+      } else {
+        response.status(statusForAskError(result.error.code)).json({ error: result.error.message, code: result.error.code });
+      }
+    })
+  );
+  return router;
+}
+
+// src/gh-client.ts
+import { spawn } from "node:child_process";
 
 // src/retry.ts
 async function retry(operation, options) {
@@ -24433,7 +24503,7 @@ async function retry(operation, options) {
   return lastResult;
 }
 function delay(milliseconds) {
-  return new Promise((resolve2) => setTimeout(resolve2, milliseconds));
+  return new Promise((resolve3) => setTimeout(resolve3, milliseconds));
 }
 
 // src/gh-client.ts
@@ -24555,8 +24625,6 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       if (!isOk(raw)) return raw;
       return ok(raw.value.trim());
     },
-    // File-level comments are not accepted by the bulk reviews endpoint, so they go through
-    // the standalone review-comment endpoint, which needs the head commit_id and subject_type.
     createFileComment(prNumber, commitId, path2, body) {
       return runWrite(
         [
@@ -24601,9 +24669,6 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
       if (!isOk(raw)) return raw;
       return parseConversationComments(raw.value);
     },
-    // Review threads (the resolved/unresolved grouping) only exist in GraphQL. The {owner}/{repo}
-    // placeholders are populated by gh from the current repository, the same context the REST
-    // calls above rely on, so this method needs nothing beyond the PR number.
     async listReviewThreads(prNumber) {
       const raw = await run([
         "api",
@@ -24640,11 +24705,6 @@ function createGhClient(execute, retryOptions = DEFAULT_RETRY_OPTIONS) {
         `query=${UNRESOLVE_THREAD_MUTATION}`
       ]);
     },
-    // Checks live in two GitHub surfaces: the check-runs API (GitHub Actions, App checks)
-    // and the legacy combined-status API (commit statuses). Both hang off the head commit,
-    // so resolve the SHA first, then merge the two responses into one normalized summary.
-    // gh api always exits 0 on success, unlike `gh pr checks` which exits non-zero on
-    // pending/failing checks and would surface as a GhError.
     async listChecks(prNumber) {
       const headSha = await this.getHeadSha(prNumber);
       if (!isOk(headSha)) return headSha;
@@ -24700,8 +24760,6 @@ function parseReviewComments(raw) {
     parsed.value.map((comment) => ({
       id: comment.id,
       path: comment.path,
-      // GitHub returns line on the current diff, falling back to original_line when the
-      // commented line is outdated against the latest push.
       line: comment.line ?? comment.original_line,
       side: comment.side === "LEFT" ? "LEFT" : "RIGHT",
       body: comment.body,
@@ -24736,10 +24794,7 @@ function parseReviewThreads(raw) {
       return {
         id: thread.id,
         isResolved: thread.isResolved,
-        // Every comment in a thread shares the same path; take it from the first one.
         path: firstComment?.path ?? "",
-        // The thread anchors to the first comment's current-diff line, falling back to the
-        // original line when the line is outdated against the latest push.
         line: firstComment ? firstComment.line ?? firstComment.originalLine : null,
         comments: thread.comments.nodes.map((comment) => ({
           id: comment.databaseId,
@@ -24758,9 +24813,7 @@ function parseCommits(raw) {
     parsed.value.map((commit) => ({
       sha: commit.sha,
       shortSha: commit.sha.slice(0, 7),
-      // Only the subject line; the body (after the first newline) is dropped for the list view.
       message: commit.commit.message.split("\n")[0],
-      // The git-author name from the commit, falling back to the GitHub login when absent.
       author: commit.commit.author?.name ?? commit.author?.login ?? "",
       date: commit.commit.author?.date ?? "",
       url: commit.html_url
@@ -24790,8 +24843,6 @@ function parseChecks(checkRunsRaw, combinedStatusRaw) {
     })),
     ...statuses.map((status) => ({
       name: status.context,
-      // Legacy statuses have no lifecycle field; map their state onto status/conclusion so the
-      // rollup treats a pending status as in-flight and a non-pending one as completed.
       status: status.state === "pending" ? "in_progress" : "completed",
       conclusion: status.state === "pending" ? "" : status.state,
       url: status.target_url ?? null
@@ -24849,7 +24900,7 @@ function parseJson(raw) {
   }
 }
 function createDefaultExecutor() {
-  return (args, stdin) => new Promise((resolve2) => {
+  return (args, stdin) => new Promise((resolve3) => {
     const child = spawn("gh", args, { stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
@@ -24859,12 +24910,12 @@ function createDefaultExecutor() {
     child.stderr.on("data", (chunk) => {
       stderr += chunk.toString();
     });
-    child.on("error", (error) => resolve2(err({ message: error.message })));
+    child.on("error", (error) => resolve3(err({ message: error.message })));
     child.on("close", (code) => {
       if (code === 0) {
-        resolve2(ok(stdout));
+        resolve3(ok(stdout));
       } else {
-        resolve2(
+        resolve3(
           err({
             message: `gh ${args.join(" ")} exited with code ${code ?? "null"}`,
             stderr,
@@ -24881,11 +24932,303 @@ function createDefaultExecutor() {
   });
 }
 
+// src/llama-runner.ts
+import { spawn as nodeSpawn } from "node:child_process";
+import { readdir } from "node:fs/promises";
+import { createServer } from "node:net";
+import { basename, dirname as dirname2, isAbsolute, join as join2, relative, resolve, sep } from "node:path";
+
+// src/llm-provider.ts
+var DEFAULT_TIMEOUT_MS = 6e4;
+var DEFAULT_RETRY = { attempts: 3, delayMs: 500 };
+async function postJson(url, body, headers, timeoutMs) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...headers },
+      body: JSON.stringify(body),
+      signal: controller.signal
+    });
+    if (!response.ok) {
+      const text = await response.text().catch(() => "");
+      return err({ code: "request_failed", message: `${url} returned ${response.status}: ${text.slice(0, 200)}` });
+    }
+    return ok(await response.json());
+  } catch (error) {
+    const reason = error.name === "AbortError" ? `timed out after ${timeoutMs}ms` : error.message;
+    return err({ code: "request_failed", message: `request to ${url} failed: ${reason}` });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+function createOpenAiCompatibleProvider(options) {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const retryOptions = options.retryOptions ?? DEFAULT_RETRY;
+  const url = `${options.baseUrl.replace(/\/+$/, "")}/chat/completions`;
+  return {
+    chat(messages) {
+      return retry(async () => {
+        const response = await postJson(
+          url,
+          { model: options.model, messages },
+          { Authorization: `Bearer ${options.apiKey}` },
+          timeoutMs
+        );
+        if (!isOk(response)) return response;
+        const content = response.value.choices?.[0]?.message?.content;
+        if (typeof content !== "string") {
+          return err({ code: "request_failed", message: "OpenAI-compatible response had no choices[0].message.content" });
+        }
+        return ok(content);
+      }, retryOptions);
+    },
+    complete(prompt) {
+      return this.chat([{ role: "user", content: prompt }]);
+    }
+  };
+}
+
+// src/server-pids.ts
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, dirname } from "node:path";
+var PID_DIR = join(tmpdir(), "pr-map-server-pids");
+function writePidFile(pidFilePath, pid) {
+  try {
+    mkdirSync(dirname(pidFilePath), { recursive: true });
+    writeFileSync(pidFilePath, String(pid));
+  } catch {
+  }
+}
+function removePidFile(pidFilePath, expectedPid) {
+  try {
+    if (expectedPid !== void 0) {
+      const content = readFileSync(pidFilePath, "utf8").trim();
+      if (content !== String(expectedPid)) {
+        return;
+      }
+    }
+    rmSync(pidFilePath, { force: true });
+  } catch {
+  }
+}
+
+// src/llama-runner.ts
+async function findFreePort() {
+  return new Promise((resolve3, reject) => {
+    const server = createServer();
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      if (addr && typeof addr === "object") {
+        const port = addr.port;
+        server.close(() => resolve3(port));
+      } else {
+        server.close(() => reject(new Error("Failed to get port")));
+      }
+    });
+    server.on("error", reject);
+  });
+}
+function sleep(ms) {
+  return new Promise((resolve3) => setTimeout(resolve3, ms));
+}
+function createLlamaSpawner(deps = {}) {
+  const spawn2 = deps.spawn ?? nodeSpawn;
+  const fetchFn = deps.fetchFn ?? fetch;
+  const pickPort = deps.pickPort ?? findFreePort;
+  const readyTimeoutMs = deps.readyTimeoutMs ?? 6e4;
+  const pollIntervalMs = deps.pollIntervalMs ?? 300;
+  const writePid = deps.writePid ?? writePidFile;
+  const removePid = deps.removePid ?? removePidFile;
+  return async (ggufPath) => {
+    let port;
+    try {
+      port = await pickPort();
+    } catch (e) {
+      return err({ code: "model_load_failed", message: `Failed to pick port: ${e.message}` });
+    }
+    let child;
+    try {
+      child = spawn2("llama-server", ["-m", ggufPath, "--port", String(port), "--host", "127.0.0.1", "--no-webui"]);
+    } catch (e) {
+      return err({ code: "llama_not_found", message: `Failed to spawn llama-server: ${e.message}` });
+    }
+    const pidFilePath = join2(PID_DIR, `${port}-llama.pid`);
+    const spawnedPid = child.pid;
+    if (spawnedPid !== void 0) {
+      writePid(pidFilePath, spawnedPid);
+      child.on("exit", () => removePid(pidFilePath, spawnedPid));
+    }
+    return new Promise((resolve3) => {
+      let resolved = false;
+      child.on("error", (e) => {
+        if (resolved) return;
+        resolved = true;
+        if (e.code === "ENOENT") {
+          resolve3(err({ code: "llama_not_found", message: "llama-server not found on PATH" }));
+        } else {
+          resolve3(err({ code: "model_load_failed", message: `llama-server error: ${e.message}` }));
+        }
+      });
+      child.on("exit", (code) => {
+        if (resolved) return;
+        resolved = true;
+        resolve3(err({ code: "model_load_failed", message: `llama-server exited early with code ${code}` }));
+      });
+      const baseUrl = `http://127.0.0.1:${port}`;
+      const healthUrl = `${baseUrl}/health`;
+      const startTime = Date.now();
+      const pollHealth = async () => {
+        while (!resolved && Date.now() - startTime < readyTimeoutMs) {
+          try {
+            const response = await fetchFn(healthUrl);
+            if (response.ok) {
+              const body = await response.json();
+              if (body.status === "ok") {
+                resolved = true;
+                resolve3(ok({
+                  baseUrl,
+                  stop: () => {
+                    child.kill();
+                    if (spawnedPid !== void 0) removePid(pidFilePath, spawnedPid);
+                  },
+                  onExit: (cb) => {
+                    child.on("exit", () => cb());
+                  }
+                }));
+                return;
+              }
+            }
+          } catch {
+          }
+          await sleep(pollIntervalMs);
+        }
+        if (!resolved) {
+          resolved = true;
+          child.kill();
+          resolve3(err({ code: "model_load_failed", message: `llama-server did not become ready within ${readyTimeoutMs}ms` }));
+        }
+      };
+      pollHealth();
+    });
+  };
+}
+function createLocalChat(options) {
+  const spawnServer = options.spawnServer ?? createLlamaSpawner();
+  const providerFor = options.providerFor ?? ((baseUrl) => createOpenAiCompatibleProvider({
+    baseUrl: `${baseUrl}/v1`,
+    apiKey: "sk-local",
+    model: "local"
+  }));
+  let current = null;
+  let mutex = Promise.resolve();
+  let shuttingDown = false;
+  async function ensure(model) {
+    if (shuttingDown) {
+      return err({ code: "model_load_failed", message: "local chat is shutting down" });
+    }
+    if (current?.model === model) {
+      return ok(void 0);
+    }
+    const resolvedDir = resolve(options.modelsDir);
+    const resolvedModel = resolve(resolvedDir, model);
+    if (isAbsolute(model) || !resolvedModel.startsWith(resolvedDir + sep)) {
+      return err({ code: "model_load_failed", message: `Model "${model}" resolves outside the models directory` });
+    }
+    current?.server.stop();
+    const ggufPath = join2(options.modelsDir, model);
+    const result = await spawnServer(ggufPath);
+    if (!isOk(result)) {
+      current = null;
+      return result;
+    }
+    if (shuttingDown) {
+      result.value.stop();
+      return err({ code: "model_load_failed", message: "local chat is shutting down" });
+    }
+    const server = result.value;
+    current = { model, server };
+    server.onExit?.(() => {
+      if (current?.server === server) {
+        current = null;
+      }
+    });
+    return ok(void 0);
+  }
+  return {
+    async listModels() {
+      try {
+        const dirents = await readdir(options.modelsDir, { recursive: true, withFileTypes: true });
+        const paths = dirents.filter((d) => d.isFile()).map((d) => join2(d.parentPath, d.name));
+        return ok(discoverModels(paths, options.modelsDir));
+      } catch {
+        return ok([]);
+      }
+    },
+    async ask(request) {
+      return new Promise((resolve3) => {
+        mutex = mutex.then(async () => {
+          try {
+            const ensured = await ensure(request.model);
+            if (!isOk(ensured)) {
+              resolve3(ensured);
+              return;
+            }
+            const reply = await providerFor(current.server.baseUrl).chat(request.messages);
+            resolve3(reply);
+          } catch (e) {
+            current = null;
+            resolve3(err({ code: "request_failed", message: `ask failed: ${e.message}` }));
+          }
+        });
+      });
+    },
+    async prewarm(model) {
+      return new Promise((resolve3) => {
+        mutex = mutex.then(async () => {
+          try {
+            resolve3(await ensure(model));
+          } catch (e) {
+            current = null;
+            resolve3(err({ code: "model_load_failed", message: `prewarm failed: ${e.message}` }));
+          }
+        });
+      });
+    },
+    async shutdown() {
+      shuttingDown = true;
+      current?.server.stop();
+      current = null;
+    },
+    isReady(model) {
+      if (model === void 0) return current !== null;
+      return current?.model === model;
+    }
+  };
+}
+function discoverModels(ggufPaths, modelsDir) {
+  return ggufPaths.filter((p) => {
+    const lower = p.toLowerCase();
+    if (!lower.endsWith(".gguf")) return false;
+    const name = basename(p).toLowerCase();
+    if (name.startsWith("mmproj")) return false;
+    return true;
+  }).map((p) => {
+    const id = relative(modelsDir, p);
+    const parentDir = dirname2(p);
+    const isNested = parentDir !== modelsDir;
+    const name = isNested ? basename(parentDir) : basename(p).replace(/\.gguf$/i, "");
+    return { id, name, path: p };
+  });
+}
+
 // src/review-endpoints.ts
-var import_express = __toESM(require_express2(), 1);
+var import_express2 = __toESM(require_express2(), 1);
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join as join3 } from "node:path";
 function addComment(store, input, makeId) {
   return store.update((state) => ({
     ...state,
@@ -25009,7 +25352,7 @@ async function submitReview(store, ghClient, event, summaryBody) {
   return ok("submitted");
 }
 function createFileReviewStore(dataDir, prNumber) {
-  const filePath = join(dataDir, "pending-review.json");
+  const filePath = join3(dataDir, "pending-review.json");
   let chain = Promise.resolve();
   const runExclusive = (task) => {
     const result = chain.then(task, task);
@@ -25050,7 +25393,7 @@ function createFileReviewStore(dataDir, prNumber) {
     clear: () => runExclusive(() => writeState({ prNumber, comments: [] }))
   };
 }
-function wrap(handler) {
+function wrap2(handler) {
   return (request, response) => {
     handler(request, response).catch((error) => {
       if (!response.headersSent) {
@@ -25061,10 +25404,10 @@ function wrap(handler) {
 }
 function createReviewRouter(deps) {
   const makeId = deps.makeId ?? (() => randomUUID());
-  const router = (0, import_express.Router)();
+  const router = (0, import_express2.Router)();
   router.post(
     "/comment",
-    wrap(async (request, response) => {
+    wrap2(async (request, response) => {
       const { scope, path: path2, line, startLine, side, startSide, body } = request.body;
       if (!body) {
         response.status(400).json({ error: "body is required" });
@@ -25096,26 +25439,26 @@ function createReviewRouter(deps) {
   );
   router.get(
     "/pending",
-    wrap(async (_request, response) => {
+    wrap2(async (_request, response) => {
       response.json(await getPending(deps.store));
     })
   );
   router.delete(
     "/comment/:id",
-    wrap(async (request, response) => {
+    wrap2(async (request, response) => {
       response.json(await removeComment(deps.store, request.params.id));
     })
   );
   router.put(
     "/summary",
-    wrap(async (request, response) => {
+    wrap2(async (request, response) => {
       const { body } = request.body;
       response.json(await setSummary(deps.store, body ?? ""));
     })
   );
   router.post(
     "/conversation",
-    wrap(async (request, response) => {
+    wrap2(async (request, response) => {
       const { body } = request.body;
       if (!body) {
         response.status(400).json({ error: "body is required" });
@@ -25138,7 +25481,7 @@ function createReviewRouter(deps) {
   );
   router.post(
     "/reply",
-    wrap(async (request, response) => {
+    wrap2(async (request, response) => {
       const { commentId, body } = request.body;
       if (!Number.isInteger(commentId) || !body) {
         response.status(400).json({ error: "an integer commentId and a body are required" });
@@ -25161,7 +25504,7 @@ function createReviewRouter(deps) {
   );
   router.post(
     "/submit",
-    wrap(async (request, response) => {
+    wrap2(async (request, response) => {
       const { event, body } = request.body;
       if (!event) {
         response.status(400).json({ error: "event is required" });
@@ -25178,10 +25521,10 @@ function createReviewRouter(deps) {
   return router;
 }
 function createExistingRouter(deps) {
-  const router = (0, import_express.Router)();
+  const router = (0, import_express2.Router)();
   router.get(
     "/",
-    wrap(async (_request, response) => {
+    wrap2(async (_request, response) => {
       const result = await getExisting(deps.store, deps.ghClient);
       if (isOk(result)) {
         response.json(result.value);
@@ -25193,10 +25536,10 @@ function createExistingRouter(deps) {
   return router;
 }
 function createChecksRouter(deps) {
-  const router = (0, import_express.Router)();
+  const router = (0, import_express2.Router)();
   router.get(
     "/",
-    wrap(async (_request, response) => {
+    wrap2(async (_request, response) => {
       const result = await getChecks(deps.store, deps.ghClient);
       if (isOk(result)) {
         response.json(result.value);
@@ -25208,10 +25551,10 @@ function createChecksRouter(deps) {
   return router;
 }
 function createCommitsRouter(deps) {
-  const router = (0, import_express.Router)();
+  const router = (0, import_express2.Router)();
   router.get(
     "/",
-    wrap(async (_request, response) => {
+    wrap2(async (_request, response) => {
       const result = await getCommits(deps.store, deps.ghClient);
       if (isOk(result)) {
         response.json(result.value);
@@ -25223,10 +25566,10 @@ function createCommitsRouter(deps) {
   return router;
 }
 function createThreadsRouter(deps) {
-  const router = (0, import_express.Router)();
+  const router = (0, import_express2.Router)();
   router.get(
     "/",
-    wrap(async (_request, response) => {
+    wrap2(async (_request, response) => {
       const result = await getThreads(deps.store, deps.ghClient);
       if (isOk(result)) {
         response.json(result.value);
@@ -25237,7 +25580,7 @@ function createThreadsRouter(deps) {
   );
   router.post(
     "/:id/resolve",
-    wrap(async (request, response) => {
+    wrap2(async (request, response) => {
       const result = await deps.ghClient.resolveReviewThread(request.params.id);
       if (isOk(result)) {
         response.json({ ok: true });
@@ -25248,7 +25591,7 @@ function createThreadsRouter(deps) {
   );
   router.post(
     "/:id/unresolve",
-    wrap(async (request, response) => {
+    wrap2(async (request, response) => {
       const result = await deps.ghClient.unresolveReviewThread(request.params.id);
       if (isOk(result)) {
         response.json({ ok: true });
@@ -25262,7 +25605,6 @@ function createThreadsRouter(deps) {
 
 // src/server.ts
 var DEFAULT_PORT = 5598;
-var PID_DIR = join2(tmpdir(), "pr-map-server-pids");
 function resolveDashboardDist() {
   for (const candidate of ["../dashboard-dist", "../dashboard/dist"]) {
     const resolved = fileURLToPath2(new URL(candidate, import.meta.url));
@@ -25272,11 +25614,11 @@ function resolveDashboardDist() {
 }
 var DASHBOARD_DIST = resolveDashboardDist();
 function createApp(deps) {
-  const app = (0, import_express2.default)();
-  app.use(import_express2.default.json());
+  const app = (0, import_express3.default)();
+  app.use(import_express3.default.json());
   app.get("/api/graph", async (_request, response) => {
     try {
-      const raw = await readFile2(join2(deps.dataDir, "graph.json"), "utf8");
+      const raw = await readFile2(join4(deps.dataDir, "graph.json"), "utf8");
       response.type("application/json").send(raw);
     } catch {
       response.status(404).json({ error: "graph.json not found" });
@@ -25287,12 +25629,13 @@ function createApp(deps) {
   app.use("/api/checks", createChecksRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use("/api/commits", createCommitsRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use("/api/threads", createThreadsRouter({ ghClient: deps.ghClient, store: deps.store }));
+  app.use("/api/ai", createAiRouter({ localChat: deps.localChat }));
   app.use("/api", (_request, response) => {
     response.status(404).json({ error: "Not found" });
   });
-  app.use(import_express2.default.static(DASHBOARD_DIST));
+  app.use(import_express3.default.static(DASHBOARD_DIST));
   app.get("*", (_request, response) => {
-    response.sendFile(join2(DASHBOARD_DIST, "index.html"), (error) => {
+    response.sendFile(join4(DASHBOARD_DIST, "index.html"), (error) => {
       if (error && !response.headersSent) {
         response.status(500).json({ error: "Dashboard build not found. Run `npm run build:plugin`." });
       }
@@ -25302,7 +25645,7 @@ function createApp(deps) {
 }
 async function readPrNumber(dataDir) {
   try {
-    const graph = JSON.parse(await readFile2(join2(dataDir, "graph.json"), "utf8"));
+    const graph = JSON.parse(await readFile2(join4(dataDir, "graph.json"), "utf8"));
     return graph.meta.number;
   } catch {
     return 0;
@@ -25310,44 +25653,45 @@ async function readPrNumber(dataDir) {
 }
 function listen(app, port) {
   return new Promise((resolvePromise, rejectPromise) => {
-    const server = app.listen(port, () => resolvePromise(server));
+    const server = app.listen(port, "127.0.0.1", () => resolvePromise(server));
     server.on("error", (error) => rejectPromise(error));
   });
 }
-function registerGracefulShutdown(server, pidFile) {
+function registerGracefulShutdown(server, pidFile, shutdownLocalChat) {
   let shuttingDown = false;
-  const shutdown = (signal) => {
+  const shutdown = async (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log(`pr-map dashboard shutting down (${signal})`);
+    removePidFile(pidFile);
     try {
-      rmSync(pidFile, { force: true });
+      await shutdownLocalChat();
     } catch {
     }
     server.close(() => process.exit(0));
   };
   for (const signal of ["SIGTERM", "SIGINT"]) {
-    process.on(signal, () => shutdown(signal));
+    process.on(signal, () => void shutdown(signal));
   }
 }
 async function startServer(dataDir, preferredPort = DEFAULT_PORT) {
   const prNumber = await readPrNumber(dataDir);
+  const localChat = createLocalChat({
+    modelsDir: process.env.PRMAP_MODELS_DIR ?? join4(homedir(), "models")
+  });
   const app = createApp({
     dataDir,
     ghClient: createGhClient(createDefaultExecutor()),
+    localChat,
     store: createFileReviewStore(dataDir, prNumber)
   });
   let port = preferredPort;
   for (let attempt = 0; attempt < 20; attempt += 1) {
     try {
       const server = await listen(app, port);
-      const pidFile = join2(PID_DIR, `${port}.pid`);
-      registerGracefulShutdown(server, pidFile);
-      try {
-        mkdirSync(PID_DIR, { recursive: true });
-        writeFileSync(pidFile, String(process.pid));
-      } catch {
-      }
+      const pidFile = join4(PID_DIR, `${port}.pid`);
+      registerGracefulShutdown(server, pidFile, () => localChat.shutdown());
+      writePidFile(pidFile, process.pid);
       const url = `http://localhost:${port}`;
       console.log(`pr-map dashboard ready at ${url}`);
       if (process.env.PRMAP_NO_OPEN !== "1") {
@@ -25366,7 +25710,7 @@ async function startServer(dataDir, preferredPort = DEFAULT_PORT) {
 }
 var dataDirArgument = process.argv[2];
 if (dataDirArgument) {
-  startServer(resolve(dataDirArgument)).catch((error) => {
+  startServer(resolve2(dataDirArgument)).catch((error) => {
     console.error(error);
     process.exit(1);
   });
