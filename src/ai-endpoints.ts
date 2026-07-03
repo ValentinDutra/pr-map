@@ -13,6 +13,10 @@ export function statusForAskError(code: LlmErrorCode): number {
 
 type AsyncHandler = (request: Request, response: Response) => Promise<void>;
 
+function isModelIdShapeValid(model: string): boolean {
+  return !model.startsWith('/') && !model.split('/').includes('..');
+}
+
 function wrap(handler: AsyncHandler) {
   return (request: Request, response: Response): void => {
     handler(request, response).catch((error: unknown) => {
@@ -49,7 +53,7 @@ export function createAiRouter(deps: AiRouterDeps): Router {
     '/warm',
     wrap(async (request, response) => {
       const { model } = request.body as { model?: unknown };
-      if (typeof model !== 'string') {
+      if (typeof model !== 'string' || !isModelIdShapeValid(model)) {
         response.status(400).json({ error: 'model (string) is required' });
         return;
       }
@@ -62,7 +66,7 @@ export function createAiRouter(deps: AiRouterDeps): Router {
     '/ask',
     wrap(async (request, response) => {
       const { model, messages } = request.body as { model?: unknown; messages?: unknown };
-      if (typeof model !== 'string' || !Array.isArray(messages)) {
+      if (typeof model !== 'string' || !isModelIdShapeValid(model) || !Array.isArray(messages)) {
         response.status(400).json({ error: 'model (string) and messages (array) are required' });
         return;
       }
