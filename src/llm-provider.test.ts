@@ -123,4 +123,63 @@ describe('createOpenAiCompatibleProvider chat', () => {
     expect((postedBody as { messages: unknown }).messages).toEqual(messages);
     expect((capturedHeaders as Record<string, string>).Authorization).toBe('Bearer sk-test');
   });
+
+  it('returns request_failed with the http status in the message on a non-2xx response', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('service unavailable', { status: 503 })),
+    );
+
+    const provider = createOpenAiCompatibleProvider({
+      model: 'gpt-4o-mini',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+      retryOptions: { attempts: 1, delayMs: 0 },
+    });
+    const result = await provider.chat([{ role: 'user', content: 'x' }]);
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('request_failed');
+      expect(result.error.message).toContain('503');
+    }
+  });
+
+  it('returns request_failed when choices[0].message.content is missing', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ choices: [{ message: {} }] }), { status: 200 })),
+    );
+
+    const provider = createOpenAiCompatibleProvider({
+      model: 'gpt-4o-mini',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+      retryOptions: { attempts: 1, delayMs: 0 },
+    });
+    const result = await provider.chat([{ role: 'user', content: 'x' }]);
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) expect(result.error.code).toBe('request_failed');
+  });
+
+  it('maps a network failure to request_failed', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('ECONNREFUSED');
+      }),
+    );
+
+    const provider = createOpenAiCompatibleProvider({
+      model: 'gpt-4o-mini',
+      baseUrl: 'https://api.openai.com/v1',
+      apiKey: 'sk-test',
+      retryOptions: { attempts: 1, delayMs: 0 },
+    });
+    const result = await provider.chat([{ role: 'user', content: 'x' }]);
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) expect(result.error.code).toBe('request_failed');
+  });
 });

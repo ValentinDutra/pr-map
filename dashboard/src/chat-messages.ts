@@ -1,4 +1,4 @@
-import type { ChatMessage } from './chat-api';
+import type { ChatMessage } from './types';
 
 export type { ChatMessage };
 
