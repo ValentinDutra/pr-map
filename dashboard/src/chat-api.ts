@@ -1,3 +1,5 @@
+import type { ChatMessage, ModelInfo } from './types';
+
 export interface AskError extends Error {
   code?: string;
   status?: number;
@@ -19,23 +21,14 @@ async function asJson<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-export interface AiModel {
-  id: string;
-  name: string;
-  path: string;
-}
-
-export interface ChatMessage {
-  role: 'user' | 'assistant';
-  content: string;
-}
-
 export const aiApi = {
   listModels: () =>
-    fetch('/api/ai/models').then((response) => asJson<{ models: AiModel[] }>(response)),
+    fetch('/api/ai/models').then((response) => asJson<{ models: ModelInfo[] }>(response)),
 
-  health: () =>
-    fetch('/api/ai/health').then((response) => asJson<{ ready: boolean }>(response)),
+  health: (model?: string) =>
+    fetch(model ? `/api/ai/health?model=${encodeURIComponent(model)}` : '/api/ai/health').then(
+      (response) => asJson<{ ready: boolean }>(response),
+    ),
 
   warm: (body: { model: string }) =>
     fetch('/api/ai/warm', {

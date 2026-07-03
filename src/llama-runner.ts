@@ -1,7 +1,7 @@
 import { type ChildProcess, spawn as nodeSpawn } from 'node:child_process';
 import { readdir } from 'node:fs/promises';
 import { createServer } from 'node:net';
-import { basename, dirname, join, relative } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { type LlmError, type LlmProvider, createOpenAiCompatibleProvider } from './llm-provider.js';
 import { type Result, err, isOk, ok } from './result.js';
 import { PID_DIR, removePidFile, writePidFile } from './server-pids.js';
@@ -138,7 +138,7 @@ export interface LocalChat {
   ask(request: { model: string; messages: ChatMessage[] }): Promise<Result<string, LlmError>>;
   prewarm(model: string): Promise<Result<void, LlmError>>;
   shutdown(): Promise<void>;
-  isReady(): boolean;
+  isReady(model?: string): boolean;
 }
 
 export interface LocalChatOptions {
@@ -164,6 +164,12 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
   async function ensure(model: string): Promise<Result<void, LlmError>> {
     if (current?.model === model) {
       return ok(undefined);
+    }
+
+    const resolvedDir = resolve(options.modelsDir);
+    const resolvedModel = resolve(resolvedDir, model);
+    if (isAbsolute(model) || !resolvedModel.startsWith(resolvedDir + sep)) {
+      return err({ code: 'model_load_failed', message: `Model "${model}" resolves outside the models directory` });
     }
 
     current?.server.stop();
@@ -235,8 +241,9 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
       current = null;
     },
 
-    isReady() {
-      return current !== null;
+    isReady(model?: string) {
+      if (model === undefined) return current !== null;
+      return current?.model === model;
     },
   };
 }

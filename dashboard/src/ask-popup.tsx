@@ -57,6 +57,7 @@ export function AiChatPopup({
   const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>([]);
 
   const [mounted, setMounted] = useState(false);
+  const healthCheckedRef = useRef(false);
   const scrollDeltaRef = useRef(0);
   const lastScrollTopsRef = useRef(new Map<EventTarget, number>());
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -85,11 +86,13 @@ export function AiChatPopup({
   }, []);
 
   useEffect(() => {
+    if (!modelId || healthCheckedRef.current) return;
+    healthCheckedRef.current = true;
     aiApi
-      .health()
+      .health(modelId)
       .then(({ ready }) => setWarming(!ready))
       .catch(() => {});
-  }, []);
+  }, [modelId]);
 
   useEffect(() => {
     if (mounted && textareaRef.current) {
@@ -190,8 +193,7 @@ export function AiChatPopup({
   const resolveModel = async (): Promise<string> => {
     if (modelId) return modelId;
     const { models } = await aiApi.listModels();
-    const coder = models.find((m) => m.name.toLowerCase().includes('coder'));
-    const id = coder?.id ?? models[0]?.id;
+    const id = resolveInitialModel(models, localStorage.getItem(MODEL_STORAGE_KEY));
     if (!id) throw new Error('No AI models available');
     setModelId(id);
     return id;
@@ -248,7 +250,7 @@ export function AiChatPopup({
   return createPortal(
     <div
       ref={popupRef}
-      className="fixed z-40 flex w-[360px] max-h-[min(60vh,420px)] flex-col rounded-md border border-slate-200 bg-white shadow-lg dark:border-slate-700 dark:bg-slate-900"
+      className="fixed z-40 flex w-[360px] max-h-[min(60vh,420px)] flex-col rounded-md border border-slate-200 bg-white text-slate-900 shadow-lg dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
       style={{
         top: position.top,
         left: position.left,
@@ -371,7 +373,10 @@ export function AiChatPopup({
             <p>Request failed.</p>
             <button
               type="button"
-              onClick={() => void runAsk(lastQuestion)}
+              onClick={() => {
+                if (!pending) void runAsk(lastQuestion);
+              }}
+              disabled={pending}
               className="mt-1 rounded bg-red-100 px-2 py-0.5 text-xs text-red-800 hover:bg-red-200 dark:bg-red-900/50 dark:text-red-200 dark:hover:bg-red-800/50"
             >
               Retry
