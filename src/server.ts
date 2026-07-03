@@ -94,7 +94,7 @@ async function readPrNumber(dataDir: string): Promise<number> {
 
 function listen(app: Express, port: number): Promise<Server> {
   return new Promise((resolvePromise, rejectPromise) => {
-    const server = app.listen(port, () => resolvePromise(server));
+    const server = app.listen(port, '127.0.0.1', () => resolvePromise(server));
     server.on('error', (error) => rejectPromise(error));
   });
 }
