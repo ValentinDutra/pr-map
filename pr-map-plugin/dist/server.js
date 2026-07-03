@@ -25024,7 +25024,7 @@ function writeServerRegistry(registryFilePath, entry) {
 function readServerRegistry(registryFilePath) {
   try {
     const parsed = JSON.parse(readFileSync(registryFilePath, "utf8"));
-    if (typeof parsed?.pid === "number" && typeof parsed?.port === "number" && typeof parsed?.model === "string") {
+    if (typeof parsed?.pid === "number" && Number.isInteger(parsed.pid) && parsed.pid > 0 && typeof parsed?.port === "number" && typeof parsed?.model === "string") {
       return { pid: parsed.pid, port: parsed.port, model: parsed.model };
     }
     return null;

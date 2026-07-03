@@ -109,6 +109,14 @@ describe('server-pids', () => {
       expect(readServerRegistry(wrongShape)).toBeNull();
     });
 
+    it('rejects entries whose pid is zero, negative, or not an integer', () => {
+      for (const pid of [0, -1, 1.5]) {
+        const file = join(tempDir, `${pid}-llama.json`);
+        writeFileSync(file, JSON.stringify({ pid, port: 1, model: 'm' }));
+        expect(readServerRegistry(file)).toBeNull();
+      }
+    });
+
     it('lists only well-formed *-llama.json entries in a directory', () => {
       writeServerRegistry(join(tempDir, '1-llama.json'), { pid: 1, port: 1, model: 'a' });
       writeServerRegistry(join(tempDir, '2-llama.json'), { pid: 2, port: 2, model: 'b' });

@@ -44,6 +44,8 @@ export function readServerRegistry(registryFilePath: string): ServerRegistryEntr
     const parsed = JSON.parse(readFileSync(registryFilePath, 'utf8')) as ServerRegistryEntry;
     if (
       typeof parsed?.pid === 'number' &&
+      Number.isInteger(parsed.pid) &&
+      parsed.pid > 0 &&
       typeof parsed?.port === 'number' &&
       typeof parsed?.model === 'string'
     ) {
