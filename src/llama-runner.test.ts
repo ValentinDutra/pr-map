@@ -3,10 +3,29 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { RunningServer } from './llama-runner.js';
-import { createLlamaSpawner, createLocalChat, discoverModels } from './llama-runner.js';
+import {
+  type LocalChat,
+  type LocalChatOptions,
+  type RunningServer,
+  createLlamaSpawner,
+  createLocalChat as createLocalChatImpl,
+  discoverModels,
+} from './llama-runner.js';
 import type { LlmError, LlmProvider } from './llm-provider.js';
 import { type Result, err, isOk, ok } from './result.js';
+import type { ServerRegistryEntry } from './server-pids.js';
+
+function createLocalChat(options: LocalChatOptions): LocalChat {
+  return createLocalChatImpl({
+    listRegistry: () => [],
+    writeRegistry: () => {},
+    removeRegistry: () => {},
+    probe: async () => true,
+    killPid: () => {},
+    env: {},
+    ...options,
+  });
+}
 
 describe('discoverModels', () => {
   it('filters mmproj and non-gguf files, returning only real chat models', () => {
@@ -128,9 +147,14 @@ describe('listModels', () => {
 
 describe('createLlamaSpawner', () => {
   function createFakeChild() {
-    const emitter = new EventEmitter() as EventEmitter & { pid: number; kill: ReturnType<typeof vi.fn> };
+    const emitter = new EventEmitter() as EventEmitter & {
+      pid: number;
+      kill: ReturnType<typeof vi.fn>;
+      unref: ReturnType<typeof vi.fn>;
+    };
     emitter.pid = 12345;
     emitter.kill = vi.fn();
+    emitter.unref = vi.fn();
     return emitter;
   }
 
@@ -147,8 +171,6 @@ describe('createLlamaSpawner', () => {
       pickPort: async () => 9999,
       readyTimeoutMs: 100,
       pollIntervalMs: 10,
-      writePid: () => {},
-      removePid: () => {},
     });
 
     const result = await spawnServer('/path/to/model.gguf');
@@ -173,8 +195,6 @@ describe('createLlamaSpawner', () => {
       pickPort: async () => 8888,
       readyTimeoutMs: 1000,
       pollIntervalMs: 10,
-      writePid: () => {},
-      removePid: () => {},
     });
 
     const result = await spawnServer('/path/to/model.gguf');
@@ -187,14 +207,13 @@ describe('createLlamaSpawner', () => {
     }
   });
 
-  it('writes pid file immediately after spawn with path ending in port-llama.pid', async () => {
+  it('spawns llama-server detached with stdio ignore, unrefs the child, and exposes its pid', async () => {
     const fakeChild = createFakeChild();
     const spawn = vi.fn(() => fakeChild);
     const fetchFn = vi.fn(async () => ({
       ok: true,
       json: async () => ({ status: 'ok' }),
     })) as unknown as typeof fetch;
-    const writePidCalls: Array<{ path: string; pid: number }> = [];
 
     const spawnServer = createLlamaSpawner({
       spawn: spawn as unknown as typeof import('node:child_process').spawn,
@@ -202,74 +221,52 @@ describe('createLlamaSpawner', () => {
       pickPort: async () => 5555,
       readyTimeoutMs: 1000,
       pollIntervalMs: 10,
-      writePid: (path, pid) => writePidCalls.push({ path, pid }),
-      removePid: () => {},
-    });
-
-    await spawnServer('/path/to/model.gguf');
-
-    expect(writePidCalls).toHaveLength(1);
-    expect(writePidCalls[0].path).toMatch(/5555-llama\.pid$/);
-    expect(writePidCalls[0].pid).toBe(12345);
-  });
-
-  it('calls removePid when stop is invoked', async () => {
-    const fakeChild = createFakeChild();
-    const spawn = vi.fn(() => fakeChild);
-    const fetchFn = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ status: 'ok' }),
-    })) as unknown as typeof fetch;
-    const removePidCalls: string[] = [];
-    let writtenPath = '';
-
-    const spawnServer = createLlamaSpawner({
-      spawn: spawn as unknown as typeof import('node:child_process').spawn,
-      fetchFn,
-      pickPort: async () => 4444,
-      readyTimeoutMs: 1000,
-      pollIntervalMs: 10,
-      writePid: (path) => { writtenPath = path; },
-      removePid: (path) => removePidCalls.push(path),
     });
 
     const result = await spawnServer('/path/to/model.gguf');
 
+    expect(spawn).toHaveBeenCalledWith(
+      'llama-server',
+      ['-m', '/path/to/model.gguf', '--port', '5555', '--host', '127.0.0.1', '--no-webui'],
+      { detached: true, stdio: 'ignore' },
+    );
+    expect(fakeChild.unref).toHaveBeenCalledTimes(1);
     expect(isOk(result)).toBe(true);
     if (isOk(result)) {
-      result.value.stop();
-      expect(removePidCalls).toHaveLength(1);
-      expect(removePidCalls[0]).toBe(writtenPath);
+      expect(result.value.pid).toBe(12345);
     }
   });
 
-  it('calls removePid when child emits exit event', async () => {
-    const fakeChild = createFakeChild();
-    const spawn = vi.fn(() => fakeChild);
+  it('exposes an undefined pid when child.pid is undefined', async () => {
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number | undefined;
+      kill: ReturnType<typeof vi.fn>;
+      unref: ReturnType<typeof vi.fn>;
+    };
+    child.pid = undefined;
+    child.kill = vi.fn();
+    child.unref = vi.fn();
+    const spawn = vi.fn(() => child);
     const fetchFn = vi.fn(async () => ({
       ok: true,
       json: async () => ({ status: 'ok' }),
     })) as unknown as typeof fetch;
-    const removePidCalls: string[] = [];
-    let writtenPath = '';
 
     const spawnServer = createLlamaSpawner({
       spawn: spawn as unknown as typeof import('node:child_process').spawn,
       fetchFn,
-      pickPort: async () => 3333,
+      pickPort: async () => 2222,
       readyTimeoutMs: 1000,
       pollIntervalMs: 10,
-      writePid: (path) => { writtenPath = path; },
-      removePid: (path) => removePidCalls.push(path),
     });
 
     const result = await spawnServer('/path/to/model.gguf');
 
     expect(isOk(result)).toBe(true);
     if (isOk(result)) {
-      fakeChild.emit('exit', 0, null);
-      expect(removePidCalls).toHaveLength(1);
-      expect(removePidCalls[0]).toBe(writtenPath);
+      expect(result.value.pid).toBeUndefined();
+      result.value.stop();
+      expect(child.kill).toHaveBeenCalled();
     }
   });
 
@@ -279,7 +276,6 @@ describe('createLlamaSpawner', () => {
     const fetchFn = vi.fn(async () => {
       throw new Error('connection refused');
     }) as unknown as typeof fetch;
-    const writePidCalls: Array<{ path: string; pid: number }> = [];
 
     const spawnServer = createLlamaSpawner({
       spawn: spawn as unknown as typeof import('node:child_process').spawn,
@@ -287,8 +283,6 @@ describe('createLlamaSpawner', () => {
       pickPort: async () => 7777,
       readyTimeoutMs: 50,
       pollIntervalMs: 10,
-      writePid: (path, pid) => writePidCalls.push({ path, pid }),
-      removePid: () => {},
     });
 
     const result = await spawnServer('/path/to/model.gguf');
@@ -298,10 +292,6 @@ describe('createLlamaSpawner', () => {
       expect(result.error.code).toBe('model_load_failed');
     }
     expect(fakeChild.kill).toHaveBeenCalled();
-
-    expect(writePidCalls).toHaveLength(1);
-    expect(writePidCalls[0].path).toMatch(/7777-llama\.pid$/);
-    expect(writePidCalls[0].pid).toBe(12345);
   });
 
   it('resolves err with code model_load_failed immediately when child exits early', async () => {
@@ -320,8 +310,6 @@ describe('createLlamaSpawner', () => {
       pickPort: async () => 6666,
       readyTimeoutMs: 5000,
       pollIntervalMs: 10,
-      writePid: () => {},
-      removePid: () => {},
     });
 
     const startTime = Date.now();
@@ -344,8 +332,6 @@ describe('createLlamaSpawner', () => {
       },
       readyTimeoutMs: 100,
       pollIntervalMs: 10,
-      writePid: () => {},
-      removePid: () => {},
     });
 
     const result = await spawnServer('/path/to/model.gguf');
@@ -372,8 +358,6 @@ describe('createLlamaSpawner', () => {
       pickPort: async () => 8080,
       readyTimeoutMs: 1000,
       pollIntervalMs: 10,
-      writePid: () => {},
-      removePid: () => {},
     });
 
     const result = await spawnServer('/path/to/model.gguf');
@@ -395,8 +379,6 @@ describe('createLlamaSpawner', () => {
       pickPort: async () => 9998,
       readyTimeoutMs: 100,
       pollIntervalMs: 10,
-      writePid: () => {},
-      removePid: () => {},
     });
 
     const result = await spawnServer('/path/to/model.gguf');
@@ -418,8 +400,6 @@ describe('createLlamaSpawner', () => {
       pickPort: async () => 9997,
       readyTimeoutMs: 100,
       pollIntervalMs: 10,
-      writePid: () => {},
-      removePid: () => {},
     });
 
     const result = await spawnServer('/path/to/model.gguf');
@@ -430,40 +410,6 @@ describe('createLlamaSpawner', () => {
     }
   });
 
-  it('skips pid-file writing when child.pid is undefined', async () => {
-    const child = new EventEmitter() as EventEmitter & {
-      pid: number | undefined;
-      kill: ReturnType<typeof vi.fn>;
-    };
-    child.pid = undefined;
-    child.kill = vi.fn();
-    const spawn = vi.fn(() => child);
-    const fetchFn = vi.fn(async () => ({
-      ok: true,
-      json: async () => ({ status: 'ok' }),
-    })) as unknown as typeof fetch;
-    const writePid = vi.fn();
-    const removePid = vi.fn();
-
-    const spawnServer = createLlamaSpawner({
-      spawn: spawn as unknown as typeof import('node:child_process').spawn,
-      fetchFn,
-      pickPort: async () => 2222,
-      readyTimeoutMs: 1000,
-      pollIntervalMs: 10,
-      writePid,
-      removePid,
-    });
-
-    const result = await spawnServer('/path/to/model.gguf');
-
-    expect(isOk(result)).toBe(true);
-    if (isOk(result)) {
-      result.value.stop();
-    }
-    expect(writePid).not.toHaveBeenCalled();
-    expect(removePid).not.toHaveBeenCalled();
-  });
 });
 
 describe('ask/shutdown', () => {
@@ -481,6 +427,18 @@ describe('ask/shutdown', () => {
     return {
       chat: async (messages) => ok(`reply:${messages.length}`),
       complete: async () => ok(''),
+    };
+  }
+
+  function memoryRegistry() {
+    const map = new Map<number, ServerRegistryEntry>();
+    return {
+      map,
+      seams: {
+        listRegistry: () => [...map.values()],
+        writeRegistry: (entry: ServerRegistryEntry) => { map.set(entry.port, entry); },
+        removeRegistry: (port: number) => { map.delete(port); },
+      },
     };
   }
 
@@ -593,12 +551,13 @@ describe('ask/shutdown', () => {
     }
   });
 
-  it('shutdown stops the running server and is idempotent', async () => {
+  it('stops the running server on shutdown and is idempotent when PRMAP_KEEP_MODEL=0', async () => {
     const { spawnServer, stopSpy } = createFakeSpawnServer();
     const localChat = createLocalChat({
       modelsDir: '/models',
       spawnServer,
       providerFor: () => createFakeProvider(),
+      env: { PRMAP_KEEP_MODEL: '0' },
     });
 
     await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'hi' }] });
@@ -611,7 +570,31 @@ describe('ask/shutdown', () => {
     expect(stopSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('stops a spawn that resolves after shutdown and leaves current null', async () => {
+  it('keeps the running server alive on shutdown under keep-alive default', async () => {
+    const stopSpy = vi.fn();
+    const spawnServer = vi.fn(
+      async (): Promise<Result<RunningServer, LlmError>> =>
+        ok({ baseUrl: 'http://127.0.0.1:9100', pid: 4242, stop: stopSpy }),
+    );
+    const registry = memoryRegistry();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+      ...registry.seams,
+    });
+
+    await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'hi' }] });
+    expect(registry.map.get(9100)).toEqual({ pid: 4242, port: 9100, model: 'm1.gguf' });
+
+    await localChat.shutdown();
+
+    expect(stopSpy).not.toHaveBeenCalled();
+    expect(registry.map.get(9100)).toEqual({ pid: 4242, port: 9100, model: 'm1.gguf' });
+    expect(localChat.isReady()).toBe(false);
+  });
+
+  it('stops a spawn that resolves after shutdown when PRMAP_KEEP_MODEL=0', async () => {
     const stopSpy = vi.fn();
     let resolveSpawn: (result: Result<RunningServer, LlmError>) => void = () => {};
     const spawnServer = vi.fn(
@@ -625,6 +608,7 @@ describe('ask/shutdown', () => {
       modelsDir: '/models',
       spawnServer,
       providerFor: () => createFakeProvider(),
+      env: { PRMAP_KEEP_MODEL: '0' },
     });
 
     const askPromise = localChat.ask({
@@ -646,6 +630,42 @@ describe('ask/shutdown', () => {
 
     await localChat.shutdown();
     expect(stopSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('leaves a spawn that resolves after shutdown running and registered under keep-alive', async () => {
+    const stopSpy = vi.fn();
+    let resolveSpawn: (result: Result<RunningServer, LlmError>) => void = () => {};
+    const spawnServer = vi.fn(
+      () =>
+        new Promise<Result<RunningServer, LlmError>>((resolve) => {
+          resolveSpawn = resolve;
+        }),
+    );
+    const registry = memoryRegistry();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+      ...registry.seams,
+    });
+
+    const askPromise = localChat.ask({
+      model: 'm1.gguf',
+      messages: [{ role: 'user', content: 'hi' }],
+    });
+
+    await new Promise((r) => setImmediate(r));
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+
+    await localChat.shutdown();
+
+    resolveSpawn(ok({ baseUrl: 'http://127.0.0.1:9200', pid: 5150, stop: stopSpy }));
+    const result = await askPromise;
+
+    expect(stopSpy).not.toHaveBeenCalled();
+    expect(registry.map.get(9200)).toEqual({ pid: 5150, port: 9200, model: 'm1.gguf' });
+    expect(localChat.isReady()).toBe(false);
+    expect(isOk(result)).toBe(false);
   });
 
   it('fails fast for an ask entered after shutdown without spawning', async () => {
@@ -737,6 +757,7 @@ describe('ask/shutdown', () => {
       modelsDir: '/models',
       spawnServer,
       providerFor,
+      env: { PRMAP_KEEP_MODEL: '0' },
     });
 
     const askPromise = localChat.ask({
@@ -1053,5 +1074,105 @@ describe('ask/shutdown', () => {
     expect(isOk(result)).toBe(true);
     expect(spawnServer).toHaveBeenCalledTimes(1);
     expect(spawnServer).toHaveBeenCalledWith(join('/models', 'subdir/model.gguf'));
+  });
+
+  it('adopts a healthy registry entry for the same model without spawning', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    const registry = memoryRegistry();
+    registry.map.set(8100, { pid: 111, port: 8100, model: 'm.gguf' });
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+      ...registry.seams,
+      probe: async () => true,
+    });
+
+    const result = await localChat.ask({ model: 'm.gguf', messages: [{ role: 'user', content: 'hi' }] });
+
+    expect(isOk(result)).toBe(true);
+    expect(spawnServer).not.toHaveBeenCalled();
+    expect(localChat.isReady('m.gguf')).toBe(true);
+  });
+
+  it('stops a different-model registry entry and spawns the requested model', async () => {
+    const killed: number[] = [];
+    const spawnServer = vi.fn(
+      async (): Promise<Result<RunningServer, LlmError>> =>
+        ok({ baseUrl: 'http://127.0.0.1:8300', pid: 222, stop: vi.fn() }),
+    );
+    const registry = memoryRegistry();
+    registry.map.set(8200, { pid: 999, port: 8200, model: 'other.gguf' });
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+      ...registry.seams,
+      killPid: (pid) => killed.push(pid),
+    });
+
+    const result = await localChat.ask({ model: 'm.gguf', messages: [{ role: 'user', content: 'hi' }] });
+
+    expect(isOk(result)).toBe(true);
+    expect(killed).toContain(999);
+    expect(registry.map.has(8200)).toBe(false);
+    expect(registry.map.get(8300)).toEqual({ pid: 222, port: 8300, model: 'm.gguf' });
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+  });
+
+  it('removes a stale registry entry whose probe fails and spawns fresh', async () => {
+    const killed: number[] = [];
+    const spawnServer = vi.fn(
+      async (): Promise<Result<RunningServer, LlmError>> =>
+        ok({ baseUrl: 'http://127.0.0.1:8500', pid: 333, stop: vi.fn() }),
+    );
+    const registry = memoryRegistry();
+    registry.map.set(8400, { pid: 888, port: 8400, model: 'm.gguf' });
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+      ...registry.seams,
+      probe: async () => false,
+      killPid: (pid) => killed.push(pid),
+    });
+
+    const result = await localChat.ask({ model: 'm.gguf', messages: [{ role: 'user', content: 'hi' }] });
+
+    expect(isOk(result)).toBe(true);
+    expect(killed).toContain(888);
+    expect(registry.map.has(8400)).toBe(false);
+    expect(registry.map.get(8500)).toEqual({ pid: 333, port: 8500, model: 'm.gguf' });
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-probes an adopted server on the next ask and respawns when it is unhealthy', async () => {
+    const spawnServer = vi.fn(
+      async (): Promise<Result<RunningServer, LlmError>> =>
+        ok({ baseUrl: 'http://127.0.0.1:8700', pid: 444, stop: vi.fn() }),
+    );
+    const registry = memoryRegistry();
+    registry.map.set(8600, { pid: 555, port: 8600, model: 'm.gguf' });
+    let probeCount = 0;
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+      ...registry.seams,
+      probe: async () => {
+        probeCount += 1;
+        return probeCount === 1;
+      },
+    });
+
+    const first = await localChat.ask({ model: 'm.gguf', messages: [{ role: 'user', content: 'a' }] });
+    expect(isOk(first)).toBe(true);
+    expect(spawnServer).not.toHaveBeenCalled();
+
+    const second = await localChat.ask({ model: 'm.gguf', messages: [{ role: 'user', content: 'b' }] });
+    expect(isOk(second)).toBe(true);
+    expect(spawnServer).toHaveBeenCalledTimes(1);
+    expect(registry.map.has(8600)).toBe(false);
+    expect(registry.map.get(8700)).toEqual({ pid: 444, port: 8700, model: 'm.gguf' });
   });
 });

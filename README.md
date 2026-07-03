@@ -139,7 +139,11 @@ models are listed.
 
 You do not manage the server. pr-map discovers the models it finds there, and when you
 pick one it spawns a local `llama-server` bound to `127.0.0.1` for that GGUF, swapping to
-a different server when you choose a different model.
+a different server when you choose a different model. That spawned `llama-server` now
+stays warm after pr-map exits: a later run of the same model adopts the running server
+instead of cold-loading the GGUF again, so it is ready almost instantly. Choosing a
+different model still swaps it. Set `PRMAP_KEEP_MODEL=0` to have each run stop its server
+on exit instead, and to stop a warm server yourself run `pkill llama-server`.
 
 **Using it during review.** Hover a diff line and click the model icon in the gutter (next
 to the `+` comment button; its tooltip reads "Ask a local model about this line"). A popup

@@ -24991,7 +24991,7 @@ function createOpenAiCompatibleProvider(options) {
 }
 
 // src/server-pids.ts
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 var PID_DIR = join(tmpdir(), "pr-map-server-pids");
@@ -25011,6 +25011,37 @@ function removePidFile(pidFilePath, expectedPid) {
       }
     }
     rmSync(pidFilePath, { force: true });
+  } catch {
+  }
+}
+function writeServerRegistry(registryFilePath, entry) {
+  try {
+    mkdirSync(dirname(registryFilePath), { recursive: true });
+    writeFileSync(registryFilePath, JSON.stringify(entry));
+  } catch {
+  }
+}
+function readServerRegistry(registryFilePath) {
+  try {
+    const parsed = JSON.parse(readFileSync(registryFilePath, "utf8"));
+    if (typeof parsed?.pid === "number" && typeof parsed?.port === "number" && typeof parsed?.model === "string") {
+      return { pid: parsed.pid, port: parsed.port, model: parsed.model };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+function listServerRegistry(dir) {
+  try {
+    return readdirSync(dir).filter((name) => name.endsWith("-llama.json")).map((name) => readServerRegistry(join(dir, name))).filter((entry) => entry !== null);
+  } catch {
+    return [];
+  }
+}
+function removeServerRegistry(registryFilePath) {
+  try {
+    rmSync(registryFilePath, { force: true });
   } catch {
   }
 }
@@ -25040,8 +25071,6 @@ function createLlamaSpawner(deps = {}) {
   const pickPort = deps.pickPort ?? findFreePort;
   const readyTimeoutMs = deps.readyTimeoutMs ?? 6e4;
   const pollIntervalMs = deps.pollIntervalMs ?? 300;
-  const writePid = deps.writePid ?? writePidFile;
-  const removePid = deps.removePid ?? removePidFile;
   return async (ggufPath) => {
     let port;
     try {
@@ -25051,16 +25080,15 @@ function createLlamaSpawner(deps = {}) {
     }
     let child;
     try {
-      child = spawn2("llama-server", ["-m", ggufPath, "--port", String(port), "--host", "127.0.0.1", "--no-webui"]);
+      child = spawn2("llama-server", ["-m", ggufPath, "--port", String(port), "--host", "127.0.0.1", "--no-webui"], {
+        detached: true,
+        stdio: "ignore"
+      });
+      child.unref();
     } catch (e) {
       return err({ code: "llama_not_found", message: `Failed to spawn llama-server: ${e.message}` });
     }
-    const pidFilePath = join2(PID_DIR, `${port}-llama.pid`);
     const spawnedPid = child.pid;
-    if (spawnedPid !== void 0) {
-      writePid(pidFilePath, spawnedPid);
-      child.on("exit", () => removePid(pidFilePath, spawnedPid));
-    }
     return new Promise((resolve3) => {
       let resolved = false;
       child.on("error", (e) => {
@@ -25090,9 +25118,9 @@ function createLlamaSpawner(deps = {}) {
                 resolved = true;
                 resolve3(ok({
                   baseUrl,
+                  pid: spawnedPid,
                   stop: () => {
                     child.kill();
-                    if (spawnedPid !== void 0) removePid(pidFilePath, spawnedPid);
                   },
                   onExit: (cb) => {
                     child.on("exit", () => cb());
@@ -25115,6 +25143,10 @@ function createLlamaSpawner(deps = {}) {
     });
   };
 }
+function portFromBaseUrl(baseUrl) {
+  const parsed = Number.parseInt(new URL(baseUrl).port, 10);
+  return Number.isNaN(parsed) ? void 0 : parsed;
+}
 function createLocalChat(options) {
   const spawnServer = options.spawnServer ?? createLlamaSpawner();
   const providerFor = options.providerFor ?? ((baseUrl) => createOpenAiCompatibleProvider({
@@ -25122,15 +25154,55 @@ function createLocalChat(options) {
     apiKey: "sk-local",
     model: "local"
   }));
+  const listRegistry = options.listRegistry ?? (() => listServerRegistry(PID_DIR));
+  const writeRegistry = options.writeRegistry ?? ((entry) => writeServerRegistry(join2(PID_DIR, `${entry.port}-llama.json`), entry));
+  const removeRegistry = options.removeRegistry ?? ((port) => removeServerRegistry(join2(PID_DIR, `${port}-llama.json`)));
+  const probe = options.probe ?? (async (healthUrl) => {
+    try {
+      const response = await fetch(healthUrl);
+      if (!response.ok) return false;
+      const body = await response.json();
+      return body.status === "ok";
+    } catch {
+      return false;
+    }
+  });
+  const killPid = options.killPid ?? ((pid) => {
+    try {
+      process.kill(pid);
+    } catch {
+    }
+  });
+  const env = options.env ?? process.env;
+  const keepAlive = () => env.PRMAP_KEEP_MODEL !== "0";
   let current = null;
   let mutex = Promise.resolve();
   let shuttingDown = false;
+  function register(server, model) {
+    const port = portFromBaseUrl(server.baseUrl);
+    if (server.pid !== void 0 && port !== void 0) {
+      writeRegistry({ pid: server.pid, port, model });
+    }
+  }
+  function releaseRegistration(server) {
+    const port = portFromBaseUrl(server.baseUrl);
+    if (port !== void 0) {
+      removeRegistry(port);
+    }
+  }
   async function ensure(model) {
     if (shuttingDown) {
       return err({ code: "model_load_failed", message: "local chat is shutting down" });
     }
     if (current?.model === model) {
-      return ok(void 0);
+      if (!current.adopted) {
+        return ok(void 0);
+      }
+      if (await probe(`${current.server.baseUrl}/health`)) {
+        return ok(void 0);
+      }
+      releaseRegistration(current.server);
+      current = null;
     }
     const resolvedDir = resolve(options.modelsDir);
     const resolvedModel = resolve(resolvedDir, model);
@@ -25138,6 +25210,30 @@ function createLocalChat(options) {
       return err({ code: "model_load_failed", message: `Model "${model}" resolves outside the models directory` });
     }
     current?.server.stop();
+    current = null;
+    for (const entry of listRegistry()) {
+      if (current === null && entry.model === model && await probe(`http://127.0.0.1:${entry.port}/health`)) {
+        const { pid, port } = entry;
+        current = {
+          model,
+          adopted: true,
+          server: {
+            baseUrl: `http://127.0.0.1:${port}`,
+            pid,
+            stop: () => {
+              killPid(pid);
+              removeRegistry(port);
+            }
+          }
+        };
+        continue;
+      }
+      killPid(entry.pid);
+      removeRegistry(entry.port);
+    }
+    if (current !== null) {
+      return ok(void 0);
+    }
     const ggufPath = join2(options.modelsDir, model);
     const result = await spawnServer(ggufPath);
     if (!isOk(result)) {
@@ -25145,11 +25241,16 @@ function createLocalChat(options) {
       return result;
     }
     if (shuttingDown) {
-      result.value.stop();
+      if (keepAlive()) {
+        register(result.value, model);
+      } else {
+        result.value.stop();
+      }
       return err({ code: "model_load_failed", message: "local chat is shutting down" });
     }
     const server = result.value;
-    current = { model, server };
+    current = { model, server, adopted: false };
+    register(server, model);
     server.onExit?.(() => {
       if (current?.server === server) {
         current = null;
@@ -25199,7 +25300,10 @@ function createLocalChat(options) {
     },
     async shutdown() {
       shuttingDown = true;
-      current?.server.stop();
+      if (!keepAlive() && current) {
+        current.server.stop();
+        releaseRegistration(current.server);
+      }
       current = null;
     },
     isReady(model) {
