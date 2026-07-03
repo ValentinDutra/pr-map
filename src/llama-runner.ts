@@ -116,7 +116,6 @@ export function createLlamaSpawner(
               }
             }
           } catch {
-            // Server not ready yet, continue polling
           }
           await sleep(pollIntervalMs);
         }

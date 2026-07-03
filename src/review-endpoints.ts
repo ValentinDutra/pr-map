@@ -31,8 +31,6 @@ export interface AddCommentInput {
   body: string;
 }
 
-// --- Operations (the testable core; the router is thin wiring over these) ---
-
 export function addComment(
   store: ReviewStore,
   input: AddCommentInput,
@@ -64,8 +62,6 @@ export interface ExistingDiscussion {
   conversationComments: ExistingConversationComment[];
 }
 
-// The discussion already on the PR (read-only): inline review comments plus PR-level
-// conversation comments, fetched from GitHub for the PR the store is tracking.
 export async function getExisting(
   store: ReviewStore,
   ghClient: GhClient,
@@ -86,8 +82,6 @@ export async function getExisting(
   });
 }
 
-// The PR's review-comment threads (read-only structure plus their resolved state), for the PR
-// the store is tracking. Resolving/unresolving a thread mutates the state these expose.
 export async function getThreads(
   store: ReviewStore,
   ghClient: GhClient,
@@ -101,7 +95,6 @@ export async function getThreads(
   return ghClient.listReviewThreads(state.prNumber);
 }
 
-// The CI/checks status for the head commit of the PR the store is tracking (read-only).
 export async function getChecks(
   store: ReviewStore,
   ghClient: GhClient,
@@ -115,8 +108,6 @@ export async function getChecks(
   return ghClient.listChecks(state.prNumber);
 }
 
-// The commit list for the PR the store is tracking (read-only): sha, subject, author, date,
-// and a link to each commit on GitHub.
 export async function getCommits(
   store: ReviewStore,
   ghClient: GhClient,
@@ -130,8 +121,6 @@ export async function getCommits(
   return ghClient.listCommits(state.prNumber);
 }
 
-// The bulk review carries the verdict, the summary body, and line-scoped comments (with
-// optional multi-line ranges). File-scoped comments are posted separately at submit time.
 export function buildSubmission(
   state: ReviewState,
   event: ReviewEvent,
@@ -170,8 +159,6 @@ export async function submitReview(
   const body = summaryBody ?? state.summaryBody ?? '';
   const hasReviewContent = body !== '' || lineComments.length > 0;
 
-  // APPROVE may be empty; REQUEST_CHANGES always needs review content (GitHub requires a body);
-  // COMMENT needs review content unless it is carried entirely by file-level comments.
   if (event === 'REQUEST_CHANGES' && !hasReviewContent) {
     return err({
       message: 'A REQUEST_CHANGES review needs a body or at least one line comment.',
@@ -183,9 +170,6 @@ export async function submitReview(
     });
   }
 
-  // File-level comments are rejected by the bulk reviews endpoint, so post them individually
-  // against the head commit before submitting the review. Each one is removed from the pending
-  // store the moment it posts, so a resubmit after a later failure never double-posts it.
   if (fileComments.length > 0) {
     const headSha = await ghClient.getHeadSha(state.prNumber);
     if (!isOk(headSha)) return headSha;
@@ -214,8 +198,6 @@ export async function submitReview(
   return ok('submitted');
 }
 
-// --- File-backed store: serialized mutations + atomic writes (thin fs glue) ---
-
 export function createFileReviewStore(dataDir: string, prNumber: number): ReviewStore {
   const filePath = join(dataDir, 'pending-review.json');
   let chain: Promise<unknown> = Promise.resolve();
@@ -232,8 +214,6 @@ export function createFileReviewStore(dataDir: string, prNumber: number): Review
   const readState = async (): Promise<ReviewState> => {
     try {
       const parsed = JSON.parse(await readFile(filePath, 'utf8')) as ReviewState;
-      // Guard against structurally-valid JSON with the wrong shape (e.g. a hand-edited file
-      // missing `comments`): a non-array would make a later `[...state.comments]` throw.
       if (!Array.isArray(parsed.comments)) {
         console.warn(`pr-map: ${filePath} has no comments array; starting a fresh pending review.`);
         return { prNumber, comments: [] };
@@ -265,8 +245,6 @@ export function createFileReviewStore(dataDir: string, prNumber: number): Review
     clear: () => runExclusive(() => writeState({ prNumber, comments: [] })),
   };
 }
-
-// --- Router (thin wiring; async handlers are guarded so rejections never hang) ---
 
 export interface ReviewRouterDeps {
   ghClient: GhClient;
@@ -414,8 +392,6 @@ export function createReviewRouter(deps: ReviewRouterDeps): Router {
   return router;
 }
 
-// Mounted at /api/existing: serves the PR's already-posted discussion (read-only). It shares
-// the review deps so it reads the same PR number the review routes write against.
 export function createExistingRouter(deps: ReviewRouterDeps): Router {
   const router = Router();
 
@@ -434,8 +410,6 @@ export function createExistingRouter(deps: ReviewRouterDeps): Router {
   return router;
 }
 
-// Mounted at /api/checks: serves the PR's CI/checks status (read-only). It shares the review
-// deps so it reads the same PR number the review routes write against.
 export function createChecksRouter(deps: ReviewRouterDeps): Router {
   const router = Router();
 
@@ -454,8 +428,6 @@ export function createChecksRouter(deps: ReviewRouterDeps): Router {
   return router;
 }
 
-// Mounted at /api/commits: serves the PR's commit list (read-only). It shares the review
-// deps so it reads the same PR number the review routes write against.
 export function createCommitsRouter(deps: ReviewRouterDeps): Router {
   const router = Router();
 
@@ -474,9 +446,6 @@ export function createCommitsRouter(deps: ReviewRouterDeps): Router {
   return router;
 }
 
-// Mounted at /api/threads: serves the PR's review-comment threads and their resolved state, and
-// accepts resolve/unresolve mutations by thread id. It shares the review deps so it reads the
-// same PR number the review routes write against.
 export function createThreadsRouter(deps: ReviewRouterDeps): Router {
   const router = Router();
 

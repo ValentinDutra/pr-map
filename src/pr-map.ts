@@ -2,11 +2,6 @@ import { spawn } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-// Standalone, agent-agnostic pipeline: graph -> enrich (provider switch) -> merge -> dashboard.
-// Any runtime that can run node (Codex, Gemini, or a human at a terminal) gets the full pr-map
-// experience without Claude's subagents. Each stage is a sibling dist script run as a child
-// process, so there are no shared-module side effects to coordinate.
-
 const distDir = dirname(fileURLToPath(import.meta.url));
 
 interface StageResult {
@@ -14,9 +9,6 @@ interface StageResult {
   stdout: string;
 }
 
-// Run a sibling dist script, streaming its output through while also capturing stdout so a
-// stage's JSON result can be read back. The child inherits this process's env (the LLM provider
-// switch) and stdin.
 function runStage(script: string, args: string[]): Promise<StageResult> {
   return new Promise((resolvePromise) => {
     const child = spawn(process.execPath, [join(distDir, script), ...args], {
@@ -33,7 +25,6 @@ function runStage(script: string, args: string[]): Promise<StageResult> {
   });
 }
 
-// The graph CLI prints a single JSON line; pull the dataDir out of it.
 function readDataDir(stdout: string): string | null {
   const line = stdout
     .split('\n')
@@ -71,8 +62,6 @@ async function main(): Promise<void> {
   }
 
   console.log('\npr-map: starting the dashboard...');
-  // The server runs in the foreground; it exits when the session ends (the cleanup hook) or on
-  // SIGINT. Inherit its exit code.
   const server = await runStage('server.js', [dataDir]);
   process.exit(server.code);
 }

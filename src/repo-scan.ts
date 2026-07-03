@@ -3,9 +3,6 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { GitGrep, ReadContent } from './build-graph.js';
 
-// Real providers for the static graph builder. Thin glue over git/fs; the core
-// builder takes these as injected dependencies so it stays pure and testable.
-
 export function createGitGrep(repoRoot: string): GitGrep {
   return (pattern) => {
     try {
@@ -15,7 +12,6 @@ export function createGitGrep(repoRoot: string): GitGrep {
       });
       return output.split('\n').filter((line) => line.length > 0);
     } catch {
-      // git grep exits non-zero when there are no matches.
       return [];
     }
   };

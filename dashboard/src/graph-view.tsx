@@ -26,7 +26,6 @@ import {
 
 const nodeTypes: NodeTypes = { file: FileNode };
 
-// Grey solid line for a real import, dashed purple for an AI-inferred link.
 function edgeBaseStyle(origin: string): CSSProperties {
   return origin === 'llm'
     ? { strokeDasharray: '6 4', stroke: '#a855f7' }
@@ -60,10 +59,6 @@ function buildFlow(
     id: edge.id,
     source: edge.source,
     target: edge.target,
-    // Only label an edge with the concrete changed symbol that crosses it. The line style
-    // (solid grey = real import, dashed purple = AI-inferred) already conveys the type, and
-    // the confidence and plain-language rationale live in the detail panel — so we skip the
-    // generic "import" / "semantic ~60%" tags that just cluttered the map.
     label: edge.affectedSymbol || undefined,
     labelStyle: { fontFamily: 'ui-monospace, monospace', fontSize: 11, fill: '#475569' },
     labelBgStyle: { fill: '#ffffff', fillOpacity: 0.85 },
@@ -90,27 +85,20 @@ export function GraphView({ graph }: { graph: PrGraph }) {
   const setTab = usePanelTab((state) => state.setTab);
   const toggleHelp = useCallback(() => setHelpOpen((open) => !open), []);
 
-  // Progress is measured over the files actually changed in this PR; context-only neighbours
-  // are not something the reviewer checks off, so they never count toward the total.
   const changedFilePaths = useMemo(
     () => graph.nodes.filter((node) => node.inPr).map((node) => node.path),
     [graph.nodes],
   );
   const viewedChangedCount = changedFilePaths.filter((path) => viewedPaths.has(path)).length;
-  // Changed files as {id, path} in graph order — the sequence keyboard navigation walks.
   const changedNodes = useMemo(
     () => graph.nodes.filter((node) => node.inPr).map((node) => ({ id: node.id, path: node.path })),
     [graph.nodes],
   );
 
   const folders = useMemo(() => folderOptions(graph.nodes), [graph.nodes]);
-  // The graph narrowed by the active filters (changed-files-only, risky-only, folder). All
-  // downstream work — layout, search highlight, click-to-focus — runs on this filtered set.
   const filtered = useMemo(() => filterGraph(graph, filters), [graph, filters]);
-  // Risky files in the current (filtered) view, for the "next risk" jump control.
   const riskyNodes = useMemo(() => filtered.nodes.filter(nodeHasRisk), [filtered.nodes]);
 
-  // Select a node and pan the canvas to it — shared by the risk jump and keyboard navigation.
   const selectAndPan = useCallback(
     (nodeId: string) => {
       select(nodeId);
@@ -119,7 +107,6 @@ export function GraphView({ graph }: { graph: PrGraph }) {
     [select, rfInstance],
   );
 
-  // Cycle selection through risky files, panning the canvas to each in turn.
   const jumpToNextRisk = () => {
     if (riskyNodes.length === 0) return;
     const index = riskIndex % riskyNodes.length;
@@ -143,9 +130,6 @@ export function GraphView({ graph }: { graph: PrGraph }) {
   const [nodes, setNodes, onNodesChange] = useNodesState<FileFlowNode>(layout.nodes);
   const [edges, setEdges, onEdgesChange] = useEdgesState(layout.edges);
 
-  // The selected file, the files it links to, and the edges between them — used to animate
-  // the flow between the focused file and its neighbours and fade everything else. Computed
-  // over the filtered edges so focus never reaches files the filters have removed.
   const focus = useMemo(() => {
     if (!selectedNodeId) return null;
     const neighbors = new Set<string>([selectedNodeId]);
@@ -160,25 +144,17 @@ export function GraphView({ graph }: { graph: PrGraph }) {
     return { neighbors, connectedEdgeIds };
   }, [filtered.edges, selectedNodeId]);
 
-  // If a filter removes the selected node, clear the selection so focus styling doesn't fade the
-  // whole graph around a node that is no longer on the canvas (and the detail panel stops showing
-  // a filtered-out file).
   useEffect(() => {
     if (selectedNodeId && !filtered.nodes.some((node) => node.id === selectedNodeId)) {
       select(null);
     }
   }, [filtered, selectedNodeId, select]);
 
-  // Re-apply the dagre layout whenever the graph or search query changes; between
-  // those changes the user can freely drag nodes (onNodesChange keeps them in state).
   useEffect(() => {
     setNodes(layout.nodes);
     setEdges(layout.edges);
   }, [layout, setNodes, setEdges]);
 
-  // Emphasise the focused file's flow without disturbing node positions: connected edges
-  // animate and brighten, unrelated edges and nodes fade. Each edge's style is recomputed
-  // from its origin so deselecting always restores the base look.
   useEffect(() => {
     setEdges((current) =>
       current.map((edge) => {
@@ -198,7 +174,6 @@ export function GraphView({ graph }: { graph: PrGraph }) {
         ...node,
         data: {
           ...node.data,
-          // Only changed files carry a viewed state; neighbours are context, never checked off.
           viewed: node.data.inPr && viewedPaths.has(node.data.label),
           focused: focus ? node.id === selectedNodeId : false,
           dimmed: focus ? !focus.neighbors.has(node.id) : false,

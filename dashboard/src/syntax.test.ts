@@ -17,7 +17,6 @@ describe('extensionLanguage', () => {
 
 describe('languageForPath', () => {
   it('returns the language only when its grammar is loaded', () => {
-    // css ships with Prism core, so it is always available.
     expect(languageForPath('theme.css')).toBe('css');
     expect(languageForPath('Makefile')).toBeNull();
   });

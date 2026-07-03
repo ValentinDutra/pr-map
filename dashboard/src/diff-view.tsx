@@ -10,12 +10,7 @@ import { useAiChatOpen } from './store';
 import { languageForPath, tokenizeCode, type SyntaxToken } from './syntax';
 import type { PendingComment, ReviewThread } from './types';
 
-// Above this many diff lines, switch from rendering every row to a measured, windowed list
-// so very large file diffs stay responsive. Smaller diffs render exactly as before — the
-// common case keeps the original, simpler code path with zero risk of regression.
 const VIRTUALIZE_THRESHOLD = 200;
-// A plain diff row is ~24px tall (leading-6); this only seeds the virtualizer before each
-// row is actually measured, so the estimate just needs to be close, not exact.
 const ESTIMATED_ROW_HEIGHT = 24;
 
 export interface DiffLineMeta {
@@ -23,9 +18,6 @@ export interface DiffLineMeta {
   newLine: number | null;
 }
 
-// Walks the unified-diff hunks to assign each row its old- and new-file line numbers,
-// the way GitHub renders a split gutter. Added rows have only a new number, removed rows
-// only an old number, context rows both; hunk headers and file headers have neither.
 function computeLineMeta(patch: string): DiffLineMeta[] {
   const meta: DiffLineMeta[] = [];
   let oldLine = 0;
@@ -48,7 +40,6 @@ function computeLineMeta(patch: string): DiffLineMeta[] {
       text.startsWith('rename ') ||
       text.startsWith('\\')
     ) {
-      // File-level headers and the "\ No newline" marker are not part of the numbered body.
       meta.push({ oldLine: null, newLine: null });
     } else if (text.startsWith('-')) {
       meta.push({ oldLine, newLine: null });
@@ -72,8 +63,6 @@ function lineBackground(text: string): string {
   return '';
 }
 
-// Render a Prism token stream to React nodes, tagging each with its `token <type>` classes so
-// the CSS theme in index.css colors it.
 function renderToken(token: SyntaxToken, key: number): ReactNode {
   if (typeof token === 'string') return token;
   const content = Array.isArray(token.content)
@@ -87,8 +76,6 @@ function renderToken(token: SyntaxToken, key: number): ReactNode {
   );
 }
 
-// A diff code line: the leading +/-/space marker kept verbatim, the rest highlighted by the
-// file's language. Falls back to plain text when the language is unknown.
 function DiffCode({ text, language }: { text: string; language: string | null }): ReactNode {
   if (!language || text === '') return text || ' ';
   const marker = text[0];
@@ -112,7 +99,6 @@ interface DiffViewProps {
   setStatus: (status: string | null) => void;
 }
 
-// The reviewer's own not-yet-submitted comment: amber, the same accent the pending list uses.
 function CommentThread({ comment }: { comment: PendingComment }) {
   const range =
     comment.startLine !== undefined ? `lines ${comment.startLine}–${comment.line}` : `line ${comment.line}`;
@@ -124,10 +110,6 @@ function CommentThread({ comment }: { comment: PendingComment }) {
   );
 }
 
-// A review thread already posted to the PR by any reviewer: slate/gray, read-only comments, with
-// author and date so it never reads like one of your own pending amber comments. A resolved
-// thread is muted and collapses to its header until expanded; the Resolve/Unresolve button
-// posts the GraphQL mutation and refreshes the thread list.
 function ExistingReviewThread({
   thread,
   onThreadsChange,
@@ -137,15 +119,12 @@ function ExistingReviewThread({
   onThreadsChange: () => void;
   setStatus: (status: string | null) => void;
 }) {
-  // Resolved threads start collapsed (just the header); expand to read them on demand.
   const [expanded, setExpanded] = useState(!thread.isResolved);
   const [busy, setBusy] = useState(false);
   const [replyOpen, setReplyOpen] = useState(false);
   const [replyBody, setReplyBody] = useState('');
   const [replyBusy, setReplyBusy] = useState(false);
 
-  // Replies target the thread's root comment id; a thread whose root has no numeric id
-  // can't be replied to, so the reply affordance hides.
   const rootCommentId = thread.comments[0]?.id ?? null;
 
   const sendReply = async () => {
@@ -300,10 +279,8 @@ export function DiffView({
   const [body, setBody] = useState('');
   const [fileOpen, setFileOpen] = useState(false);
   const [fileBody, setFileBody] = useState('');
-  // The in-progress click-drag over the new-file line numbers (GitHub-style range select).
   const [drag, setDrag] = useState<{ anchor: number; hover: number } | null>(null);
   const dragRef = useRef<{ anchor: number; hover: number } | null>(null);
-  // AI chat popup state: the anchor rect (captured at click time) plus the code context.
   const [aiChat, setAiChat] = useState<{
     anchorRect: { top: number; bottom: number; left: number };
     code: string;
@@ -315,11 +292,8 @@ export function DiffView({
 
   const lineComments = comments.filter((comment) => comment.scope === 'line');
   const fileComments = comments.filter((comment) => comment.scope === 'file');
-  // Anchor existing threads to their new-file line, the same gutter the inline comment UI uses.
   const lineThreads = threads.filter((thread) => thread.line !== null);
 
-  // Press the "+" on a line and drag up or down to grow the selection; release to open the box.
-  // Holding shift extends the existing selection instead of starting a new one.
   const beginDrag = (newLine: number, event: ReactPointerEvent) => {
     event.preventDefault();
     if (event.shiftKey && target) {
@@ -336,7 +310,6 @@ export function DiffView({
     setTarget(null);
   };
 
-  // Called as the pointer moves over each line while a drag is active.
   const extendDrag = (newLine: number) => {
     if (!dragRef.current) return;
     const next = { anchor: dragRef.current.anchor, hover: newLine };
@@ -344,9 +317,6 @@ export function DiffView({
     setDrag(next);
   };
 
-  // One continuous tracker on the scroll container: while a drag is active, read the
-  // new-file line under the cursor and grow the selection — but only re-render when the
-  // line actually changes, so dragging stays smooth even on a long diff.
   const trackDrag = (event: ReactPointerEvent) => {
     if (!dragRef.current) return;
     const row = (event.target as HTMLElement).closest<HTMLElement>('[data-newline]');
@@ -372,16 +342,12 @@ export function DiffView({
     return () => window.removeEventListener('pointerup', finishDrag);
   }, []);
 
-  // Highlight follows the live drag while dragging, otherwise the committed selection.
   const selection = drag
     ? { start: Math.min(drag.anchor, drag.hover), end: Math.max(drag.anchor, drag.hover) }
     : target
       ? { start: target.startLine ?? target.line, end: target.line }
       : null;
 
-  // Border classes that make the whole multi-line selection read as ONE rectangle:
-  // left/right on every selected row, a top edge on the first row and a bottom edge on the
-  // last one — no internal horizontal lines dividing the selected lines.
   const rangeBorders = (newLine: number | null): string => {
     if (newLine === null || selection === null) return '';
     if (newLine < selection.start || newLine > selection.end) return '';
@@ -412,10 +378,6 @@ export function DiffView({
     }
   };
 
-  // Prefill a GitHub ```suggestion block with the current content of the commented line(s) so the
-  // reviewer edits the replacement text in place. Anchored to the same line range as the comment,
-  // GitHub renders it as an applyable suggestion. Appended below any prose already typed; a no-op
-  // once a block is present so it never stacks two.
   const insertSuggestion = () => {
     if (!target || hasSuggestionBlock(body)) return;
     const startLine = target.startLine ?? target.line;
@@ -436,9 +398,6 @@ export function DiffView({
     }
   };
 
-  // One row of the diff: the gutters + code, then any inline threads / the active editor
-  // stacked underneath it. Shared verbatim by the plain and the virtualized list so a small
-  // diff and a large diff render byte-for-byte identical markup for the same line.
   const renderRow = (lineIndex: number): ReactNode => {
     const text = lines[lineIndex];
     const { oldLine, newLine } = lineMeta[lineIndex] ?? { oldLine: null, newLine: null };
@@ -666,10 +625,6 @@ export function DiffView({
   );
 }
 
-// Windowed diff body for large files: only the rows in/near the viewport are mounted, so the
-// row count no longer drives render cost. Heights are MEASURED (rows carrying comment threads
-// or the active editor are much taller than a plain line), so the virtualizer sizes each row
-// from its real DOM, not a fixed guess.
 function VirtualizedDiff({
   rowCount,
   renderRow,
@@ -687,9 +642,6 @@ function VirtualizedDiff({
     count: rowCount,
     getScrollElement: () => scrollRef.current,
     estimateSize: () => ESTIMATED_ROW_HEIGHT,
-    // Keep extra rows mounted above/below the viewport. The drag tracker reads the row under
-    // the cursor, so a generous overscan means rows are already in the DOM as the user
-    // scrolls a selection past the visible edge, keeping the range extending smoothly.
     overscan: 24,
   });
 

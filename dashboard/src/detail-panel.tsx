@@ -11,7 +11,6 @@ function originBadge(edge: GraphEdge): string {
     : 'border-slate-300 bg-slate-50 text-slate-600 dark:border-slate-600 dark:bg-slate-800 dark:text-slate-300';
 }
 
-// Plain-language origin: an AI-inferred link vs. a real code import the scanner found.
 function originLabel(edge: GraphEdge): string {
   return edge.origin === 'llm' ? 'AI' : 'import';
 }
@@ -70,8 +69,6 @@ export function DetailPanel({
   const connectedEdges = graph.edges.filter(
     (edge) => edge.source === node.id || edge.target === node.id,
   );
-  // Progress is measured against the files actually changed in this PR — neighbours pulled in
-  // for context are not something the reviewer needs to check off.
   const changedFiles = graph.nodes.filter((candidate) => candidate.inPr);
   const viewedChangedCount = changedFiles.filter((candidate) =>
     viewedPaths.has(candidate.path),

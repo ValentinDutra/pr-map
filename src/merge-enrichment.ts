@@ -14,9 +14,6 @@ export interface EnrichmentResult {
   semanticEdges?: { target: string; confidence: number; why: string }[];
 }
 
-// Pure merge: applies subagent enrichment onto a static graph without mutating the input.
-// Adds `why`/`summary`/`insights` and `origin: "llm"` semantic edges; never removes or
-// alters existing `origin: "static"` edges beyond attaching a `why`.
 export function mergeEnrichment(graph: PrGraph, results: EnrichmentResult[]): PrGraph {
   const nodesById = new Map(graph.nodes.map((node) => [node.id, { ...node }]));
   const edgesById = new Map(graph.edges.map((edge) => [edge.id, { ...edge }]));
@@ -37,8 +34,6 @@ export function mergeEnrichment(graph: PrGraph, results: EnrichmentResult[]): Pr
       if (semantic.target === result.path) continue;
       const id = `${result.path}->${semantic.target}:semantic:outgoing`;
       if (edgesById.has(id)) continue;
-      // The semantic target may be a file the static scan never added (e.g. an alias import
-      // it could not resolve). Add it as a neighbor node so the edge actually renders.
       if (!nodesById.has(semantic.target)) {
         nodesById.set(semantic.target, {
           id: semantic.target,
@@ -47,8 +42,6 @@ export function mergeEnrichment(graph: PrGraph, results: EnrichmentResult[]): Pr
           inPr: false,
         });
       }
-      // Clamp the model-provided confidence into [0, 1] (defaulting a missing/NaN value to a
-      // neutral 0.5) so the dashboard never renders a nonsensical percentage.
       const confidence = Number.isFinite(semantic.confidence)
         ? Math.min(1, Math.max(0, semantic.confidence))
         : 0.5;
@@ -108,7 +101,6 @@ export async function mergeEnrichmentFromDir(
     try {
       results.push(...flattenResults(JSON.parse(await readFile(join(enrichmentDir, name), 'utf8'))));
     } catch {
-      // Skip a malformed enrichment file rather than failing the whole merge.
       console.warn(`pr-map: skipping unparseable enrichment file ${name}`);
     }
   }
@@ -135,8 +127,6 @@ async function main(): Promise<void> {
   console.log(JSON.stringify(result.value));
 }
 
-// Run as a CLI only when invoked directly (not when imported by tests). realpath handles
-// macOS /var -> /private symlinks; pathToFileURL handles encoding.
 const invokedDirectly =
   process.argv[1] !== undefined &&
   import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href;

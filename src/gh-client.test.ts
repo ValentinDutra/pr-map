@@ -138,8 +138,6 @@ describe('createGhClient', () => {
 
     const result = await client.createConversationComment(42, 'general thought');
 
-    // Reads retry (see the test above); writes must not — gh can exit non-zero after GitHub
-    // already accepted the post, so a retry would create a duplicate comment/review.
     expect(calls).toHaveLength(1);
     expect(isOk(result)).toBe(false);
   });
@@ -247,7 +245,6 @@ describe('createGhClient', () => {
         createdAt: '2026-06-01T00:00:00Z',
         inReplyToId: 7,
       });
-      // Falls back to original_line when line is null, defaults author and reply id.
       expect(result.value[1]).toMatchObject({ line: 4, author: '', inReplyToId: null });
     }
   });
@@ -288,7 +285,6 @@ describe('createGhClient', () => {
   it('listChecks slurps paginated check-runs and combined status, flattening every page', async () => {
     const { execute, calls } = recordingExecutor([
       ok('feedface\n'),
-      // --slurp wraps pages in an array; both pages of check-runs must be flattened into one list.
       ok(
         JSON.stringify([
           {
@@ -444,7 +440,6 @@ describe('createGhClient', () => {
 
     const result = await client.listChecks(42);
 
-    // Three retry attempts on the failing head-sha call, then it gives up before any checks call.
     expect(calls).toHaveLength(3);
     expect(isOk(result)).toBe(false);
   });
@@ -485,13 +480,11 @@ describe('createGhClient', () => {
       expect(result.value[0]).toEqual({
         sha: 'abc1234567890',
         shortSha: 'abc1234',
-        // Only the subject line of the message is kept.
         message: 'Add discounts',
         author: 'Ada Lovelace',
         date: '2026-06-01T00:00:00Z',
         url: 'https://github.com/acme/shop/commit/abc1234567890',
       });
-      // Falls back to the GitHub login and an empty date when commit.author is null.
       expect(result.value[1]).toMatchObject({ author: 'octocat', date: '' });
     }
   });
@@ -583,11 +576,9 @@ describe('createGhClient', () => {
         line: 12,
         comments: [
           { id: 11, author: 'octocat', body: 'first', createdAt: '2026-06-01T00:00:00Z' },
-          // The reply defaults a missing author to an empty string.
           { id: 12, author: '', body: 'reply', createdAt: '2026-06-01T01:00:00Z' },
         ],
       });
-      // Falls back to the first comment's originalLine when its current line is null.
       expect(result.value[1]).toMatchObject({ id: 'PRRT_outdated', isResolved: false, line: 4 });
     }
   });

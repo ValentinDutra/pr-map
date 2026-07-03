@@ -60,8 +60,6 @@ export async function fetchPr(
       previousPath: file.previousPath,
     };
     if (file.status !== 'deleted') {
-      // Resolve content against the immutable head SHA so it still works after the head branch
-      // is deleted or force-pushed; fall back to the branch name only if the SHA is missing.
       const contentResult = await ghClient.getFileContent(file.path, meta.headSha || meta.headRef);
       if (isOk(contentResult)) {
         rawFile.content = contentResult.value;

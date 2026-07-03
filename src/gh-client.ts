@@ -95,8 +95,6 @@ const DEFAULT_RETRY_OPTIONS: RetryOptions = { attempts: 3, delayMs: 300 };
 const PR_METADATA_FIELDS =
   'number,title,body,author,baseRefName,headRefName,headRefOid,url';
 
-// Review threads are a GraphQL-only concept (the REST comments list has no thread grouping and
-// no resolved state), so this query reads the thread structure plus each thread's comments.
 const REVIEW_THREADS_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
   repository(owner: $owner, name: $name) {
     pullRequest(number: $number) {
@@ -122,7 +120,6 @@ const REVIEW_THREADS_QUERY = `query($owner: String!, $name: String!, $number: In
   }
 }`;
 
-// Resolving/unresolving a thread is a GraphQL-only mutation keyed by the thread's node id.
 const RESOLVE_THREAD_MUTATION = `mutation($threadId: ID!) {
   resolveReviewThread(input: { threadId: $threadId }) {
     thread { id isResolved }
@@ -142,9 +139,6 @@ export function createGhClient(
   const run = (args: string[], stdin?: string): Promise<Result<string, GhError>> =>
     retry(() => execute(args, stdin), retryOptions);
 
-  // Reads are retried (idempotent). Writes/mutations are NOT retried: gh can exit non-zero on a
-  // transient error after GitHub already created the resource, so a retry would post a duplicate
-  // review or comment. A failed write surfaces to the user, who can retry it deliberately.
   const runWrite = (args: string[], stdin?: string): Promise<Result<string, GhError>> =>
     execute(args, stdin);
 
@@ -234,8 +228,6 @@ export function createGhClient(
       return ok(raw.value.trim());
     },
 
-    // File-level comments are not accepted by the bulk reviews endpoint, so they go through
-    // the standalone review-comment endpoint, which needs the head commit_id and subject_type.
     createFileComment(prNumber, commitId, path, body) {
       return runWrite(
         [
@@ -284,9 +276,6 @@ export function createGhClient(
       return parseConversationComments(raw.value);
     },
 
-    // Review threads (the resolved/unresolved grouping) only exist in GraphQL. The {owner}/{repo}
-    // placeholders are populated by gh from the current repository, the same context the REST
-    // calls above rely on, so this method needs nothing beyond the PR number.
     async listReviewThreads(prNumber) {
       const raw = await run([
         'api',
@@ -326,20 +315,11 @@ export function createGhClient(
       ]);
     },
 
-    // Checks live in two GitHub surfaces: the check-runs API (GitHub Actions, App checks)
-    // and the legacy combined-status API (commit statuses). Both hang off the head commit,
-    // so resolve the SHA first, then merge the two responses into one normalized summary.
-    // gh api always exits 0 on success, unlike `gh pr checks` which exits non-zero on
-    // pending/failing checks and would surface as a GhError.
     async listChecks(prNumber) {
       const headSha = await this.getHeadSha(prNumber);
       if (!isOk(headSha)) return headSha;
       const sha = headSha.value;
 
-      // Both endpoints are object-shaped (`{ check_runs }` / `{ state, statuses }`), so plain
-      // --paginate would concatenate page objects into invalid JSON. --slurp wraps the pages in
-      // a single JSON array, which parseChecks flattens — covering commits with many checks or
-      // many legacy statuses without dropping pages.
       const checkRunsRaw = await run([
         'api',
         `repos/{owner}/{repo}/commits/${sha}/check-runs`,
@@ -435,8 +415,6 @@ function parseReviewComments(raw: string): Result<ExistingReviewComment[], GhErr
     parsed.value.map((comment) => ({
       id: comment.id,
       path: comment.path,
-      // GitHub returns line on the current diff, falling back to original_line when the
-      // commented line is outdated against the latest push.
       line: comment.line ?? comment.original_line,
       side: comment.side === 'LEFT' ? 'LEFT' : 'RIGHT',
       body: comment.body,
@@ -502,10 +480,7 @@ function parseReviewThreads(raw: string): Result<ReviewThread[], GhError> {
       return {
         id: thread.id,
         isResolved: thread.isResolved,
-        // Every comment in a thread shares the same path; take it from the first one.
         path: firstComment?.path ?? '',
-        // The thread anchors to the first comment's current-diff line, falling back to the
-        // original line when the line is outdated against the latest push.
         line: firstComment ? firstComment.line ?? firstComment.originalLine : null,
         comments: thread.comments.nodes.map((comment) => ({
           id: comment.databaseId,
@@ -535,9 +510,7 @@ function parseCommits(raw: string): Result<CommitInfo[], GhError> {
     parsed.value.map((commit) => ({
       sha: commit.sha,
       shortSha: commit.sha.slice(0, 7),
-      // Only the subject line; the body (after the first newline) is dropped for the list view.
       message: commit.commit.message.split('\n')[0],
-      // The git-author name from the commit, falling back to the GitHub login when absent.
       author: commit.commit.author?.name ?? commit.author?.login ?? '',
       date: commit.commit.author?.date ?? '',
       url: commit.html_url,
@@ -553,7 +526,6 @@ interface RawCheckRun {
   details_url?: string | null;
 }
 
-// One page of each --slurp-ed response. gh wraps all fetched pages in a JSON array.
 interface RawCheckRunsPage {
   check_runs?: RawCheckRun[];
 }
@@ -574,9 +546,6 @@ const FAILURE_CONCLUSIONS = new Set([
   'action_required',
 ]);
 
-// Each argument is a --slurp-ed JSON array of page objects. Flatten check-runs and statuses
-// across all pages; the combined `state` rollup is repeated on every page, so read it from the
-// first (defaulting to success when there are no status pages at all).
 function parseChecks(
   checkRunsRaw: string,
   combinedStatusRaw: string,
@@ -599,8 +568,6 @@ function parseChecks(
     })),
     ...statuses.map((status) => ({
       name: status.context,
-      // Legacy statuses have no lifecycle field; map their state onto status/conclusion so the
-      // rollup treats a pending status as in-flight and a non-pending one as completed.
       status: status.state === 'pending' ? 'in_progress' : 'completed',
       conclusion: status.state === 'pending' ? '' : status.state,
       url: status.target_url ?? null,
@@ -658,7 +625,6 @@ function mapStatus(githubStatus: string): NodeStatus {
 function parseRepoFromUrl(
   url: string,
 ): Result<{ owner: string; repo: string }, GhError> {
-  // Host-agnostic so GitHub Enterprise URLs parse too.
   const match = /([^/]+)\/([^/]+)\/pull\/\d+/.exec(url);
   if (!match) {
     return err({ message: `Could not parse owner/repo from PR url: ${url}` });
@@ -702,8 +668,6 @@ export function createDefaultExecutor(): CommandExecutor {
           );
         }
       });
-      // Guard against an async stream error (e.g. EPIPE when gh exits early) so it
-      // surfaces as a Result via the 'error'/'close' handlers instead of crashing.
       child.stdin.on('error', () => undefined);
       if (stdin !== undefined) {
         child.stdin.write(stdin);

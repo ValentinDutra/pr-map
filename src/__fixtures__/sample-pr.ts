@@ -13,7 +13,6 @@ const meta: PrMeta = {
   headSha: 'shadiscount',
 };
 
-// Every file the (imaginary) repo tracks, including unchanged neighbors.
 export const sampleRepoFiles = new Set<string>([
   'src/app.ts',
   'lib/db.ts',

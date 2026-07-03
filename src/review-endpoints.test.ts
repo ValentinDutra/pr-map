@@ -148,7 +148,6 @@ describe('submitReview', () => {
     expect(fileComments).toEqual([
       { prNumber: 7, commitId: 'sha-1', path: 'a.ts', body: 'whole file' },
     ]);
-    // A COMMENT carried entirely by a file comment needs no bulk review.
     expect(submissions).toHaveLength(0);
     expect((await store.load()).comments).toHaveLength(0);
   });
@@ -173,8 +172,6 @@ describe('submitReview', () => {
 
     const result = await submitReview(store, client, 'COMMENT');
 
-    // The file comment posts exactly once; the review then fails; the posted file comment is
-    // removed from the store so a resubmit re-posts the review but not the file comment.
     expect(fileComments).toHaveLength(1);
     expect(result.ok).toBe(false);
     expect((await store.load()).comments.map((comment) => comment.scope)).toEqual(['line']);

@@ -26,7 +26,6 @@ describe('server-pids', () => {
     });
 
     it('does not throw when writing to an un-writable path', () => {
-      // Create a regular file where a directory would need to be
       const blocker = join(tempDir, 'blocker');
       writeFileSync(blocker, 'I am a file');
       const pidFile = join(blocker, 'subdir', '123.pid');

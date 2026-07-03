@@ -23,8 +23,6 @@ import type { PrGraph } from './types.js';
 
 const DEFAULT_PORT = 5598;
 
-// Resolve the dashboard whether running bundled (pr-map-plugin/dist/server.js, dashboard at
-// ../dashboard-dist) or from source in dev (src/server.js, dashboard at ../dashboard/dist).
 function resolveDashboardDist(): string {
   for (const candidate of ['../dashboard-dist', '../dashboard/dist']) {
     const resolved = fileURLToPath(new URL(candidate, import.meta.url));
@@ -62,7 +60,6 @@ export function createApp(deps: ServerDeps): Express {
   app.use('/api/threads', createThreadsRouter({ ghClient: deps.ghClient, store: deps.store }));
   app.use('/api/ai', createAiRouter({ localChat: deps.localChat }));
 
-  // Any unmatched /api/* path returns JSON 404 instead of falling through to the SPA HTML.
   app.use('/api', (_request, response) => {
     response.status(404).json({ error: 'Not found' });
   });
@@ -70,8 +67,6 @@ export function createApp(deps: ServerDeps): Express {
   app.use(express.static(DASHBOARD_DIST));
   app.get('*', (_request, response) => {
     response.sendFile(join(DASHBOARD_DIST, 'index.html'), (error) => {
-      // A missing index.html (dashboard not built) would otherwise surface as an opaque
-      // Express error; return a clear message instead.
       if (error && !response.headersSent) {
         response
           .status(500)
@@ -99,9 +94,6 @@ function listen(app: Express, port: number): Promise<Server> {
   });
 }
 
-// Register handlers that stop accepting new connections, close the HTTP server, and exit 0
-// when the parent process signals shutdown (e.g. the SessionEnd cleanup hook sends SIGTERM).
-// A guard ensures the shutdown sequence runs only once even if multiple signals arrive.
 function registerGracefulShutdown(
   server: Server,
   pidFile: string,
@@ -117,7 +109,6 @@ function registerGracefulShutdown(
     try {
       await shutdownLocalChat();
     } catch {
-      // Best effort: model server stop should not block HTTP shutdown.
     }
     server.close(() => process.exit(0));
   };

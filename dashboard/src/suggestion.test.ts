@@ -5,7 +5,6 @@ import {
   hasSuggestionBlock,
 } from './suggestion';
 
-// A small unified diff: one context line, one removed line, two added lines.
 const diffLines = [
   '@@ -1,2 +1,3 @@',
   ' const a = 1;',
@@ -14,11 +13,11 @@ const diffLines = [
   '+const c = 4;',
 ];
 const lineMeta = [
-  { newLine: null }, // hunk header
-  { newLine: 1 }, // context
-  { newLine: null }, // removed
-  { newLine: 2 }, // added
-  { newLine: 3 }, // added
+  { newLine: null },
+  { newLine: 1 },
+  { newLine: null },
+  { newLine: 2 },
+  { newLine: 3 },
 ];
 
 describe('currentLineContents', () => {
