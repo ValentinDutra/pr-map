@@ -34,8 +34,10 @@ export const aiApi = {
   listModels: () =>
     fetch('/api/ai/models').then((response) => asJson<{ models: AiModel[] }>(response)),
 
-  health: () =>
-    fetch('/api/ai/health').then((response) => asJson<{ ready: boolean }>(response)),
+  health: (model?: string) =>
+    fetch(model ? `/api/ai/health?model=${encodeURIComponent(model)}` : '/api/ai/health').then(
+      (response) => asJson<{ ready: boolean }>(response),
+    ),
 
   warm: (body: { model: string }) =>
     fetch('/api/ai/warm', {

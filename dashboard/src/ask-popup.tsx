@@ -57,6 +57,7 @@ export function AiChatPopup({
   const [conversationHistory, setConversationHistory] = useState<ChatMessage[]>([]);
 
   const [mounted, setMounted] = useState(false);
+  const healthCheckedRef = useRef(false);
   const scrollDeltaRef = useRef(0);
   const lastScrollTopsRef = useRef(new Map<EventTarget, number>());
   const [elapsedMs, setElapsedMs] = useState(0);
@@ -85,11 +86,13 @@ export function AiChatPopup({
   }, []);
 
   useEffect(() => {
+    if (!modelId || healthCheckedRef.current) return;
+    healthCheckedRef.current = true;
     aiApi
-      .health()
+      .health(modelId)
       .then(({ ready }) => setWarming(!ready))
       .catch(() => {});
-  }, []);
+  }, [modelId]);
 
   useEffect(() => {
     if (mounted && textareaRef.current) {

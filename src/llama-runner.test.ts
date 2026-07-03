@@ -597,6 +597,21 @@ describe('ask/shutdown', () => {
     expect(localChat.isReady()).toBe(false);
   });
 
+  it('isReady is model-scoped: true for the warm model, false for another', async () => {
+    const { spawnServer } = createFakeSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    await localChat.prewarm('A');
+
+    expect(localChat.isReady('A')).toBe(true);
+    expect(localChat.isReady('B')).toBe(false);
+    expect(localChat.isReady()).toBe(true);
+  });
+
   it('resets current when spawnServer throws during swap so same-model ask respawns', async () => {
     const stop1 = vi.fn();
     let callCount = 0;
