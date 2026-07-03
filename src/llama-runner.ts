@@ -10,6 +10,7 @@ import type { ChatMessage, ModelInfo } from './types.js';
 export interface RunningServer {
   baseUrl: string;
   stop: () => void;
+  onExit?: (cb: () => void) => void;
 }
 
 export interface LlamaSpawnerDeps {
@@ -106,7 +107,11 @@ export function createLlamaSpawner(
               const body = (await response.json()) as { status?: string };
               if (body.status === 'ok') {
                 resolved = true;
-                resolve(ok({ baseUrl, stop: () => { child.kill(); if (spawnedPid !== undefined) removePid(pidFilePath, spawnedPid); } }));
+                resolve(ok({
+                  baseUrl,
+                  stop: () => { child.kill(); if (spawnedPid !== undefined) removePid(pidFilePath, spawnedPid); },
+                  onExit: (cb) => { child.on('exit', () => cb()); },
+                }));
                 return;
               }
             }
@@ -176,7 +181,13 @@ export function createLocalChat(options: LocalChatOptions): LocalChat {
       return result;
     }
 
-    current = { model, server: result.value };
+    const server = result.value;
+    current = { model, server };
+    server.onExit?.(() => {
+      if (current?.server === server) {
+        current = null;
+      }
+    });
     return ok(undefined);
   }
 

@@ -370,6 +370,24 @@ describe('ask/shutdown', () => {
     };
   }
 
+  function createCrashableSpawnServer() {
+    const servers: Array<{ triggerExit: () => void; stop: ReturnType<typeof vi.fn> }> = [];
+    let callCount = 0;
+    const spawnServer = vi.fn(async (): Promise<Result<RunningServer, LlmError>> => {
+      callCount++;
+      const listeners: Array<() => void> = [];
+      const stop = vi.fn();
+      const server: RunningServer = {
+        baseUrl: `http://127.0.0.1:${9000 + callCount}`,
+        stop,
+        onExit: (cb) => { listeners.push(cb); },
+      };
+      servers.push({ triggerExit: () => { for (const l of listeners) l(); }, stop });
+      return ok(server);
+    });
+    return { spawnServer, servers };
+  }
+
   it('concurrent asks for same model spawn server exactly once', async () => {
     const { spawnServer, stopSpy } = createFakeSpawnServer();
     const providerFor = vi.fn(() => createFakeProvider());
@@ -648,6 +666,48 @@ describe('ask/shutdown', () => {
     const r3 = await localChat.ask({ model: 'm1.gguf', messages: [{ role: 'user', content: 'c' }] });
     expect(spawnServer).toHaveBeenCalledTimes(3);
     expect(isOk(r3)).toBe(true);
+  });
+
+  it('detects an unexpected child exit and respawns on the next ask', async () => {
+    const { spawnServer, servers } = createCrashableSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    const r1 = await localChat.ask({ model: 'm', messages: [{ role: 'user', content: 'a' }] });
+    expect(isOk(r1)).toBe(true);
+    expect(localChat.isReady()).toBe(true);
+
+    servers[0].triggerExit();
+    expect(localChat.isReady()).toBe(false);
+
+    const r2 = await localChat.ask({ model: 'm', messages: [{ role: 'user', content: 'b' }] });
+    expect(isOk(r2)).toBe(true);
+    expect(spawnServer).toHaveBeenCalledTimes(2);
+    expect(localChat.isReady()).toBe(true);
+  });
+
+  it('a late exit from a swapped-out server does not clear the newer current', async () => {
+    const { spawnServer, servers } = createCrashableSpawnServer();
+    const localChat = createLocalChat({
+      modelsDir: '/models',
+      spawnServer,
+      providerFor: () => createFakeProvider(),
+    });
+
+    await localChat.ask({ model: 'A', messages: [{ role: 'user', content: 'a' }] });
+    await localChat.ask({ model: 'B', messages: [{ role: 'user', content: 'b' }] });
+    expect(spawnServer).toHaveBeenCalledTimes(2);
+    expect(localChat.isReady()).toBe(true);
+
+    servers[0].triggerExit();
+
+    expect(localChat.isReady()).toBe(true);
+    const r = await localChat.ask({ model: 'B', messages: [{ role: 'user', content: 'c' }] });
+    expect(isOk(r)).toBe(true);
+    expect(spawnServer).toHaveBeenCalledTimes(2);
   });
 
   it('prewarm spawns the server once and leaves isReady true', async () => {
