@@ -370,7 +370,10 @@ export function AiChatPopup({
             <p>Request failed.</p>
             <button
               type="button"
-              onClick={() => void runAsk(lastQuestion)}
+              onClick={() => {
+                if (!pending) void runAsk(lastQuestion);
+              }}
+              disabled={pending}
               className="mt-1 rounded bg-red-100 px-2 py-0.5 text-xs text-red-800 hover:bg-red-200 dark:bg-red-900/50 dark:text-red-200 dark:hover:bg-red-800/50"
             >
               Retry
