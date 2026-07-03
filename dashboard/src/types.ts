@@ -1,6 +1,3 @@
-// Mirrors the PrGraph contract from ../../src/types.ts. Kept as a separate copy so
-// the dashboard does not cross the Node package boundary at build time.
-
 export type NodeStatus = 'added' | 'modified' | 'deleted' | 'renamed';
 
 export interface NodeInsights {
@@ -79,7 +76,6 @@ export interface ReviewState {
   summaryBody?: string;
 }
 
-// A line-scoped review comment already posted to the PR by any reviewer (read-only).
 export interface ExistingReviewComment {
   id: number;
   path: string;
@@ -91,7 +87,6 @@ export interface ExistingReviewComment {
   inReplyToId: number | null;
 }
 
-// A PR-level (Conversation tab) comment already posted to the PR by any reviewer (read-only).
 export interface ExistingConversationComment {
   id: number;
   body: string;
@@ -104,7 +99,6 @@ export interface ExistingDiscussion {
   conversationComments: ExistingConversationComment[];
 }
 
-// A single comment inside a review thread (read-only).
 export interface ReviewThreadComment {
   id: number | null;
   author: string;
@@ -112,8 +106,6 @@ export interface ReviewThreadComment {
   createdAt: string;
 }
 
-// A review-comment thread on the PR with its resolved state and the GraphQL node id used to
-// resolve/unresolve it.
 export interface ReviewThread {
   id: string;
   isResolved: boolean;
@@ -122,7 +114,6 @@ export interface ReviewThread {
   comments: ReviewThreadComment[];
 }
 
-// A single commit on the PR (read-only): sha, subject line, author, date, and a GitHub link.
 export interface CommitInfo {
   sha: string;
   shortSha: string;
@@ -132,10 +123,8 @@ export interface CommitInfo {
   url: string;
 }
 
-// The overall CI verdict for the PR's head commit, rolled up across every check.
 export type ChecksState = 'success' | 'failure' | 'pending';
 
-// A single CI check on the PR's head commit (GitHub Actions, App checks, or legacy statuses).
 export interface CheckRun {
   name: string;
   status: string;
@@ -143,7 +132,6 @@ export interface CheckRun {
   url: string | null;
 }
 
-// All checks on the PR's head commit plus the rolled-up overall verdict (read-only).
 export interface ChecksSummary {
   state: ChecksState;
   checks: CheckRun[];

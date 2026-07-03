@@ -1,7 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { buildCodeContext } from './code-context';
 
-// A small unified diff: context, removed, two added lines, more context.
 const diffLines = [
   '@@ -1,4 +1,5 @@',
   ' const a = 1;',
@@ -13,14 +12,14 @@ const diffLines = [
   ' const f = 6;',
 ];
 const lineMeta = [
-  { oldLine: null, newLine: null }, // hunk header
-  { oldLine: 1, newLine: 1 }, // context
-  { oldLine: 2, newLine: 2 }, // context
-  { oldLine: 3, newLine: null }, // removed
-  { oldLine: null, newLine: 3 }, // added
-  { oldLine: null, newLine: 4 }, // added
-  { oldLine: 4, newLine: 5 }, // context
-  { oldLine: 5, newLine: 6 }, // context
+  { oldLine: null, newLine: null },
+  { oldLine: 1, newLine: 1 },
+  { oldLine: 2, newLine: 2 },
+  { oldLine: 3, newLine: null },
+  { oldLine: null, newLine: 3 },
+  { oldLine: null, newLine: 4 },
+  { oldLine: 4, newLine: 5 },
+  { oldLine: 5, newLine: 6 },
 ];
 
 describe('buildCodeContext', () => {

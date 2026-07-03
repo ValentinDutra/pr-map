@@ -30,8 +30,6 @@ export function ReviewControls({ pending, refresh, status, setStatus }: ReviewCo
     }
   };
 
-  // The PR-level comment is the review summary, posted together with the verdict on submit —
-  // the same model GitHub uses, so there is no separate standalone-comment surface.
   const submitReview = async () => {
     try {
       await reviewApi.setSummary(summary);

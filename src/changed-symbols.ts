@@ -9,8 +9,6 @@ const JS_TS_LANGUAGES = new Set(['typescript', 'javascript']);
 
 type NamesExtractor = (code: string) => string[];
 
-// Exported declaration names visible in a single line of JS/TS source. Only exported
-// symbols can be imported elsewhere, so those are the ones that decide affectedness.
 function jsTsNamesFrom(code: string): string[] {
   const names: string[] = [];
   const declarationPatterns = [
@@ -23,7 +21,6 @@ function jsTsNamesFrom(code: string): string[] {
     let match: RegExpExecArray | null;
     while ((match = pattern.exec(code)) !== null) names.push(match[1]);
   }
-  // Re-export lists: `export { foo, bar as baz }` exports `foo` and `baz`.
   const bracedExports = /\bexport\s*\{([^}]*)\}/g;
   let bracedMatch: RegExpExecArray | null;
   while ((bracedMatch = bracedExports.exec(code)) !== null) {
@@ -38,7 +35,6 @@ function jsTsNamesFrom(code: string): string[] {
   return names;
 }
 
-// Top-level (module-public) names in a single line of Python source.
 function pythonNamesFrom(code: string): string[] {
   const names: string[] = [];
   const declarationPatterns = [
@@ -52,8 +48,6 @@ function pythonNamesFrom(code: string): string[] {
   return names;
 }
 
-// The code fragments a diff actually changed: each hunk header's enclosing-declaration
-// context (git puts it after the second `@@`) plus every added/removed line's content.
 function relevantCodeFragments(patch: string): string[] {
   const fragments: string[] = [];
   for (const rawLine of patch.split('\n')) {
@@ -79,7 +73,6 @@ export function extractChangedSymbols(input: ChangedSymbolsInput): Set<string> {
   if (!namesFrom) return new Set();
 
   const result = new Set<string>();
-  // An added file is entirely new, so every export it declares is "changed".
   if (input.status === 'added' && input.headContent) {
     for (const line of input.headContent.split('\n')) {
       for (const name of namesFrom(line)) result.add(name);

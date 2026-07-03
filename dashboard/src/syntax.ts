@@ -1,6 +1,4 @@
 import Prism from 'prismjs';
-// Grammars register by side effect; import in dependency order — tsx needs jsx + typescript,
-// which need the javascript/markup/css grammars that prismjs core already bundles.
 import 'prismjs/components/prism-typescript';
 import 'prismjs/components/prism-jsx';
 import 'prismjs/components/prism-tsx';
@@ -17,8 +15,6 @@ import 'prismjs/components/prism-sql';
 
 export type SyntaxToken = string | Prism.Token;
 
-// File extension → Prism language id. markup/css/javascript ship with Prism core; the rest are
-// registered by the imports above. Curated on purpose — a catch-all would bloat the bundle.
 const EXT_TO_LANG: Record<string, string> = {
   ts: 'typescript',
   mts: 'typescript',
@@ -51,14 +47,11 @@ const EXT_TO_LANG: Record<string, string> = {
   sql: 'sql',
 };
 
-// Pure extension lookup with no grammar dependency, so it is trivially testable.
 export function extensionLanguage(path: string): string | null {
   const extension = path.split('.').pop()?.toLowerCase() ?? '';
   return EXT_TO_LANG[extension] ?? null;
 }
 
-// The Prism language for a path, or null when the extension is unmapped or its grammar did not
-// load — callers then render plain text.
 export function languageForPath(path: string): string | null {
   const language = extensionLanguage(path);
   if (!language) return null;

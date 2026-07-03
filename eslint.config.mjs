@@ -14,7 +14,6 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    // Node build scripts (plain ESM, no TypeScript) need node globals declared.
     files: ['**/*.mjs'],
     languageOptions: {
       globals: { console: 'readonly', process: 'readonly', URL: 'readonly' },
@@ -26,6 +25,7 @@ export default tseslint.config(
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
       ],
+      'no-empty': ['error', { allowEmptyCatch: true }],
     },
   },
 );

@@ -21,8 +21,6 @@ export function Sidebar({ graph, width }: { graph: PrGraph; width: number }) {
     refresh();
   }, [refresh]);
 
-  // Review threads carry resolve state that the dashboard can mutate, so they are re-fetchable:
-  // load on mount and again after every resolve/unresolve so the UI reflects the new state.
   const refreshThreads = useCallback(() => {
     reviewApi
       .getThreads()

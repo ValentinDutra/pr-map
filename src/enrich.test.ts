@@ -110,7 +110,6 @@ describe('enrichGraph', () => {
       },
     };
     await enrichGraph(graph, { provider });
-    // One changed file -> one batch -> one provider call; the neighbor src/b.ts is not enriched.
     expect(calls).toBe(1);
   });
 
@@ -133,7 +132,6 @@ describe('enrichGraph', () => {
         progress.push(current);
       },
     });
-    // 12 changed files batch into 5 + 5 + 2 = 3 batches; each reports the same total once.
     expect(progress.map((entry) => entry.total)).toEqual([3, 3, 3]);
     expect(progress.map((entry) => entry.completed).sort((a, b) => a - b)).toEqual([1, 2, 3]);
   });
