@@ -115,6 +115,15 @@ describe('listModels', () => {
     if (!isOk(result)) return;
     expect(result.value).toEqual([]);
   });
+
+  it('returns ok([]) for an existing but empty directory', async () => {
+    const localChat = createLocalChat({ modelsDir: tempDir });
+    const result = await localChat.listModels();
+
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) return;
+    expect(result.value).toEqual([]);
+  });
 });
 
 describe('createLlamaSpawner', () => {
@@ -349,6 +358,114 @@ describe('createLlamaSpawner', () => {
       expect(result.error.code).toBe('model_load_failed');
       expect(result.error.message).toContain('network error');
     }
+  });
+
+  it('keeps polling while health status is not ok and succeeds once it becomes ok', async () => {
+    const fakeChild = createFakeChild();
+    const spawn = vi.fn(() => fakeChild);
+    let calls = 0;
+    const fetchFn = vi.fn(async () => {
+      calls += 1;
+      return { ok: true, json: async () => ({ status: calls === 1 ? 'loading' : 'ok' }) };
+    }) as unknown as typeof fetch;
+
+    const spawnServer = createLlamaSpawner({
+      spawn: spawn as unknown as typeof import('node:child_process').spawn,
+      fetchFn,
+      pickPort: async () => 8080,
+      readyTimeoutMs: 1000,
+      pollIntervalMs: 10,
+      writePid: () => {},
+      removePid: () => {},
+    });
+
+    const result = await spawnServer('/path/to/model.gguf');
+
+    expect(isOk(result)).toBe(true);
+    expect(calls).toBeGreaterThan(1);
+  });
+
+  it('resolves err with code model_load_failed when child emits a non-ENOENT error', async () => {
+    const fakeChild = createFakeChild();
+    const spawn = vi.fn(() => {
+      setImmediate(() => fakeChild.emit('error', { code: 'EACCES', message: 'permission denied' }));
+      return fakeChild;
+    });
+
+    const spawnServer = createLlamaSpawner({
+      spawn: spawn as unknown as typeof import('node:child_process').spawn,
+      fetchFn: vi.fn(),
+      pickPort: async () => 9998,
+      readyTimeoutMs: 100,
+      pollIntervalMs: 10,
+      writePid: () => {},
+      removePid: () => {},
+    });
+
+    const result = await spawnServer('/path/to/model.gguf');
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('model_load_failed');
+    }
+  });
+
+  it('resolves err with code llama_not_found when spawn throws synchronously', async () => {
+    const spawn = vi.fn(() => {
+      throw new Error('spawn EPERM');
+    });
+
+    const spawnServer = createLlamaSpawner({
+      spawn: spawn as unknown as typeof import('node:child_process').spawn,
+      fetchFn: vi.fn(),
+      pickPort: async () => 9997,
+      readyTimeoutMs: 100,
+      pollIntervalMs: 10,
+      writePid: () => {},
+      removePid: () => {},
+    });
+
+    const result = await spawnServer('/path/to/model.gguf');
+
+    expect(isOk(result)).toBe(false);
+    if (!isOk(result)) {
+      expect(result.error.code).toBe('llama_not_found');
+    }
+  });
+
+  it('skips pid-file writing when child.pid is undefined', async () => {
+    const child = new EventEmitter() as EventEmitter & {
+      pid: number | undefined;
+      kill: ReturnType<typeof vi.fn>;
+    };
+    child.pid = undefined;
+    child.kill = vi.fn();
+    const spawn = vi.fn(() => child);
+    const fetchFn = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ status: 'ok' }),
+    })) as unknown as typeof fetch;
+    const writePid = vi.fn();
+    const removePid = vi.fn();
+
+    const spawnServer = createLlamaSpawner({
+      spawn: spawn as unknown as typeof import('node:child_process').spawn,
+      fetchFn,
+      pickPort: async () => 2222,
+      readyTimeoutMs: 1000,
+      pollIntervalMs: 10,
+      writePid,
+      removePid,
+    });
+
+    const result = await spawnServer('/path/to/model.gguf');
+
+    expect(isOk(result)).toBe(true);
+    if (isOk(result)) {
+      result.value.stop();
+    }
+    expect(writePid).not.toHaveBeenCalled();
+    expect(removePid).not.toHaveBeenCalled();
   });
 });
 
