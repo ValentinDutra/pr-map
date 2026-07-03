@@ -26,10 +26,12 @@ import {
 
 const nodeTypes: NodeTypes = { file: FileNode };
 
-function edgeBaseStyle(origin: string): CSSProperties {
-  return origin === 'llm'
-    ? { strokeDasharray: '6 4', stroke: '#a855f7' }
-    : { stroke: '#64748b' };
+const edgeRestStyle: CSSProperties = { opacity: 0.85, strokeWidth: 1.5 };
+const edgeConnectedStyle: CSSProperties = { opacity: 1, strokeWidth: 2.5 };
+const edgeDimmedStyle: CSSProperties = { opacity: 0.18, strokeWidth: 1 };
+
+function edgeClassName(origin: string): string {
+  return origin === 'llm' ? 'pr-edge pr-edge-ai' : 'pr-edge pr-edge-static';
 }
 
 function buildFlow(
@@ -60,13 +62,13 @@ function buildFlow(
     source: edge.source,
     target: edge.target,
     label: edge.affectedSymbol || undefined,
-    labelStyle: { fontFamily: 'ui-monospace, monospace', fontSize: 11, fill: '#475569' },
-    labelBgStyle: { fill: '#ffffff', fillOpacity: 0.85 },
+    labelStyle: { fontFamily: 'ui-monospace, monospace', fontSize: 11 },
     labelBgPadding: [4, 2] as [number, number],
     labelBgBorderRadius: 4,
     data: { origin: edge.origin },
+    className: edgeClassName(edge.origin),
     animated: false,
-    style: edgeBaseStyle(edge.origin),
+    style: edgeRestStyle,
   }));
 
   return { nodes: layoutGraph(flowNodes, flowEdges), edges: flowEdges };
@@ -158,14 +160,12 @@ export function GraphView({ graph }: { graph: PrGraph }) {
   useEffect(() => {
     setEdges((current) =>
       current.map((edge) => {
-        const origin = (edge.data as { origin?: string } | undefined)?.origin ?? 'static';
-        const base = edgeBaseStyle(origin);
-        if (!focus) return { ...edge, animated: false, style: { ...base, opacity: 1, strokeWidth: 1.5 } };
+        if (!focus) return { ...edge, animated: false, style: edgeRestStyle };
         const connected = focus.connectedEdgeIds.has(edge.id);
         return {
           ...edge,
           animated: connected,
-          style: { ...base, opacity: connected ? 1 : 0.3, strokeWidth: connected ? 2.5 : 1 },
+          style: connected ? edgeConnectedStyle : edgeDimmedStyle,
         };
       }),
     );
@@ -239,7 +239,7 @@ export function GraphView({ graph }: { graph: PrGraph }) {
           </div>
         ) : null}
         <div className="text-[10px] text-slate-500 dark:text-slate-400">
-          solid grey = real import · dashed purple = AI-inferred
+          solid blue = real import · dashed purple = AI-inferred
         </div>
         <div className="text-[10px] text-slate-500 dark:text-slate-400">
           click a file to trace its flow
